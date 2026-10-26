@@ -28,7 +28,6 @@ p { margin: 0 0 .75rem; }
 .tab { display: inline-flex; align-items: center; gap: .35rem; background: none; border: 0; border-radius: 999px; padding: .5rem .8rem; font: inherit; font-weight: 600; color: var(--muted); cursor: pointer; }
 .tab:hover { color: var(--fg); }
 .tab.active { background: var(--accent); color: var(--accent-fg); }
-@media (max-width: 520px) { .tab span:last-child { display: none; } .tab.active span:last-child { display: inline; } }
 
 .card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 1rem 1.1rem; margin-bottom: 1rem; box-shadow: var(--shadow); }
 .row { display: flex; gap: .6rem; flex-wrap: wrap; align-items: center; }
@@ -151,3 +150,46 @@ button[aria-pressed="true"] { cursor: default; }
 .runner { position: absolute; top: var(--y); left: -4rem; font-size: var(--s); animation: march 6.5s linear var(--d) forwards; }
 @keyframes march { 0% { transform: translateX(0) translateY(0) rotate(-6deg); } 25% { transform: translateX(30vw) translateY(-1.2rem) rotate(6deg); } 50% { transform: translateX(60vw) translateY(0) rotate(-6deg); } 75% { transform: translateX(90vw) translateY(-1.2rem) rotate(6deg); } 100% { transform: translateX(calc(100vw + 5rem)) translateY(0) rotate(0); } }
 @media (prefers-reduced-motion: reduce) { .pet-emoji { animation: none; } .runner { animation: none; display: none; } }
+
+/* ===== Layout: phone vs computer ===== */
+.tab span:first-child { font-size: 1.15rem; line-height: 1; }
+
+/* Phones and small tablets: app-style bottom tab bar, thumb-sized buttons */
+@media (max-width: 719px) {
+  .wrap { width: min(100% - 1.5rem, 640px); }
+  .top-inner { flex-wrap: nowrap; }
+  .brand { font-size: 1.05rem; }
+  .user { font-size: .8rem; justify-content: flex-end; }
+  #nav { position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 0; background: var(--card); border-top: 1px solid var(--border); padding: .25rem .25rem calc(.25rem + env(safe-area-inset-bottom)); }
+  .tab { flex-direction: column; gap: .1rem; border-radius: 12px; padding: .4rem .1rem; font-size: .7rem; min-height: 52px; justify-content: center; }
+  .tab span:first-child { font-size: 1.4rem; }
+  main { padding: 1rem 0 calc(6.5rem + env(safe-area-inset-bottom)); }
+  #toasts { bottom: calc(5rem + env(safe-area-inset-bottom)); }
+  h1 { font-size: 1.5rem; }
+  .card { padding: .9rem; border-radius: 14px; }
+  .grid2 { grid-template-columns: repeat(2, 1fr); }
+  .shop { grid-template-columns: repeat(2, 1fr); }
+  .farm-grid { grid-template-columns: repeat(2, 1fr); }
+  button.big, .row > button.primary { min-height: 52px; }
+  .quiz-q { font-size: 1.25rem; }
+}
+
+/* Computers: side menu on the left, wider content, bigger grids */
+@media (min-width: 960px) {
+  body { font-size: 17px; }
+  .top-inner.wrap { width: min(100% - 4rem, 1240px); }
+  #nav { position: fixed; top: 4.2rem; left: max(1.5rem, calc(50% - 620px)); width: 11.5rem; flex-direction: column; gap: .25rem; flex-wrap: nowrap; }
+  .tab { justify-content: flex-start; border-radius: 12px; padding: .7rem .9rem; font-size: 1rem; }
+  .tab:hover:not(.active) { background: var(--bg); }
+  main.wrap { width: min(100% - 4rem, 1240px); padding-left: 13.5rem; padding-top: 1.75rem; box-sizing: border-box; }
+  h1 { font-size: 2rem; }
+  .card { padding: 1.25rem 1.4rem; }
+  .grid2 { grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)); }
+  .shop { grid-template-columns: repeat(auto-fill, minmax(11.5rem, 1fr)); }
+  .farm-grid { grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr)); }
+  .quiz-q { font-size: 1.6rem; }
+  button.big { width: auto; min-width: 14rem; }
+}
+@media (min-width: 1500px) { body { font-size: 18px; } }
+@media (min-width: 960px) { body:has(#nav:empty) main.wrap { padding-left: 0; width: min(100% - 4rem, 620px); } }
+@media (min-width: 960px) { .heat { max-width: 640px; } }
