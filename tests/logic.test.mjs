@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import * as L from "../public/logic.js";
+import * as Shop from "../public/shop.js";
 
 test("dates", () => {
   assert.equal(L.addDays("2026-02-27", 2), "2026-03-01");
@@ -104,14 +105,6 @@ test("home screen summaries", () => {
   assert.equal(L.heatLevel(25, 10), 4);
 });
 
-test("bulk add", () => {
-  const { items, skipped } = L.parseBulk("What is 2+2? | 4\nCapital of Spain\tMadrid\nH2O :: Water\n\njust text\n | empty question");
-  assert.deepEqual(items, [{ q: "What is 2+2?", a: "4" }, { q: "Capital of Spain", a: "Madrid" }, { q: "H2O", a: "Water" }]);
-  assert.equal(skipped, 2);
-  assert.deepEqual(L.parseBulk("a | b | c").items, [{ q: "a", a: "b | c" }]);
-  assert.deepEqual(L.parseBulk(null), { items: [], skipped: 0 });
-});
-
 test("sanitiseState keeps good data and drops junk", () => {
   const good = L.starterState("2026-10-26");
   good.stats.points = 55; good.stats.badges.first = "2026-10-26"; good.stats.days["2026-10-26"] = { n: 4, c: 3, p: 30 };
@@ -146,4 +139,154 @@ test("sanitiseState keeps good data and drops junk", () => {
   assert.equal(messy.settings.dailyGoal, 200);
   assert.deepEqual(messy.treats, [{ id: "x", name: "Tea", cost: 1 }]);
   assert.equal(Object.getPrototypeOf(messy.stats.days), Object.prototype);
+});
+
+const rows = (text) => L.parseQuestionList(text).items.map((i) => [i.q, i.a, ...i.choices]);
+
+test("pasted lists: the format the AI prompt asks for", () => {
+  const r = L.parseQuestionList("What is 2+2? | 4 | 3 | 5 | 22\nCapital of Spain | Madrid\n\nno separator here\n | no question");
+  assert.deepEqual(r.items, [
+    { q: "What is 2+2?", a: "4", choices: ["3", "5", "22"] },
+    { q: "Capital of Spain", a: "Madrid", choices: [] },
+  ]);
+  assert.equal(r.skipped, 2);
+  assert.deepEqual(rows("a | b | c | b | C"), [["a", "b", "c", "C"]], "duplicates of the answer are dropped");
+});
+
+test("pasted lists: numbering, bold, code fences and markdown tables", () => {
+  assert.deepEqual(rows("```\n1. **Capital of Italy** | **Rome**\n2) Capital of Peru | Lima\n- Capital of Chad | N'Djamena\n```"),
+    [["Capital of Italy", "Rome"], ["Capital of Peru", "Lima"], ["Capital of Chad", "N'Djamena"]]);
+  assert.deepEqual(rows("| Question | Answer |\n|---|---|\n| H2O is? | Water |\n| NaCl is? | Salt |"), [["H2O is?", "Water"], ["NaCl is?", "Salt"]]);
+});
+
+test("pasted lists: spreadsheet, csv, dashes and double colons", () => {
+  assert.deepEqual(rows("Capital of Spain\tMadrid\nCapital of Italy\tRome"), [["Capital of Spain", "Madrid"], ["Capital of Italy", "Rome"]]);
+  assert.deepEqual(rows('Capital of Spain, Madrid\n"Who wrote ""Hamlet"", the play?",Shakespeare'), [["Capital of Spain", "Madrid"], ['Who wrote "Hamlet", the play?', "Shakespeare"]]);
+  assert.deepEqual(rows("Largest planet — Jupiter\nH2O :: Water\nWhat is 3x3? 9"), [["Largest planet", "Jupiter"], ["H2O", "Water"], ["What is 3x3?", "9"]]);
+});
+
+test("pasted lists: Q/A blocks and JSON", () => {
+  const blocks = "Q1: What is the powerhouse of the cell?\nA1: Mitochondria\n\n**Question 2:** Which gas do plants take in?\n**Answer:** Carbon dioxide\nWrong options: Oxygen | Nitrogen | Helium\n\nQ: Long question that\ncontinues here?\nA: Yes";
+  assert.deepEqual(rows(blocks), [
+    ["What is the powerhouse of the cell?", "Mitochondria"],
+    ["Which gas do plants take in?", "Carbon dioxide", "Oxygen", "Nitrogen", "Helium"],
+    ["Long question that continues here?", "Yes"],
+  ]);
+  assert.deepEqual(rows('[{"question":"a?","answer":"b","wrong":["c","d"]},["e?","f"],{"q":"","a":"x"},7]'), [["a?", "b", "c", "d"], ["e?", "f"]]);
+  assert.equal(L.parseQuestionList('{"questions":[{"q":"a","a":"b"}]}').items.length, 1);
+  assert.equal(L.parseQuestionList("[not json").items.length, 0);
+});
+
+test("pasted lists: empty, junk and huge input never throw", () => {
+  assert.deepEqual(L.parseQuestionList(""), { items: [], skipped: 0, format: "empty" });
+  assert.equal(L.parseQuestionList(null).items.length, 0);
+  assert.equal(L.parseQuestionList("%%%\n???\n|||").items.length, 0);
+  const big = Array.from({ length: 800 }, (_, i) => `q${i} | a${i}`).join("\n");
+  assert.equal(L.parseQuestionList(big).items.length, 500);
+  assert.equal(L.parseQuestionList("x".repeat(2000) + " | " + "y".repeat(2000)).items[0].q.length, 500);
+});
+
+test("duplicates are flagged", () => {
+  const existing = [{ subjectId: "s", q: "Capital of France?" }, { subjectId: "other", q: "Capital of Spain?" }];
+  const out = L.markDuplicates([{ q: "capital of france" }, { q: "Capital of Spain?" }, { q: "Capital of Spain?" }], existing, "s");
+  assert.deepEqual(out.map((o) => o.duplicate), [true, false, true]);
+});
+
+test("AI prompt asks for the format the parser reads", () => {
+  const p = L.buildAiPrompt({ topic: "Photosynthesis", level: "GCSE", count: 12, style: "choice" });
+  assert.ok(p.includes('"Photosynthesis"') && p.includes("12 revision questions") && p.includes("3 wrong options"));
+  assert.ok(L.buildAiPrompt({}).includes("[type your topic here]"));
+  assert.ok(L.buildAiPrompt({ topic: "x", count: 9999 }).includes("50 revision"));
+  const reply = "Which organelle makes ATP? | Mitochondria | Nucleus | Ribosome | Vacuole";
+  assert.equal(L.parseQuestionList(reply).items[0].choices.length, 3);
+});
+
+test("chests", () => {
+  const pts = [0, 0.44, 0.46, 0.74, 0.76, 0.89, 0.91, 0.969, 0.971, 0.9999].map((r) => L.chestReward(() => r));
+  assert.deepEqual(pts, [20, 20, 35, 35, 50, 50, 80, 80, 150, 150]);
+  const s = L.emptyState();
+  assert.equal(L.openChest(s), null);
+  s.chests = 2;
+  const got = L.openChest(s, () => 0.99);
+  assert.equal(got, 150); assert.equal(s.chests, 1); assert.equal(s.stats.points, 150); assert.equal(s.stats.chestsOpened, 1);
+  let total = 0; for (let i = 0; i < 20000; i++) total += L.chestReward();
+  assert.ok(Math.abs(total / 20000 - 36.9) < 3, "average payout is about 37 points");
+});
+
+test("weekly quests", () => {
+  const s = L.emptyState(); // goal 10 -> 50 answers, 4 days, 30 correct
+  const today = "2026-10-29"; // Thursday; week starts Monday 2026-10-26
+  assert.equal(L.weekStart(today), "2026-10-26");
+  s.stats.days["2026-10-25"] = { n: 99, c: 99, p: 0 }; // last week doesn't count
+  s.stats.days["2026-10-26"] = { n: 20, c: 15, p: 0 };
+  s.stats.days["2026-10-27"] = { n: 20, c: 10, p: 0 };
+  let q = L.weeklyQuests(s, today);
+  assert.deepEqual(q.map((x) => [x.id, x.progress, x.target, x.done]), [["answers", 40, 50, false], ["days", 2, 4, false], ["correct", 25, 30, false]]);
+  assert.deepEqual(L.claimQuest(s, "answers", today), { ok: false }, "can't claim unfinished");
+  s.stats.days["2026-10-28"] = { n: 12, c: 8, p: 0 };
+  s.stats.days["2026-10-29"] = { n: 1, c: 1, p: 0 };
+  assert.ok(L.weeklyQuests(s, today).every((x) => x.done));
+  assert.deepEqual(L.claimQuest(s, "answers", today), { ok: true, points: 40, chest: false });
+  assert.deepEqual(L.claimQuest(s, "answers", today), { ok: false }, "only once");
+  L.claimQuest(s, "days", today);
+  assert.deepEqual(L.claimQuest(s, "correct", today), { ok: true, points: 40, chest: true });
+  assert.equal(s.chests, 1); assert.equal(s.stats.points, 120); assert.equal(s.stats.questsDone, 3);
+  assert.ok(L.weeklyQuests(s, "2026-11-02").every((x) => !x.claimed), "a new week starts fresh");
+  assert.equal(L.weeklyQuests(s, today).filter((x) => x.claimed).length, 3);
+});
+
+test("study buddy", () => {
+  assert.equal(L.buddyFor(1).emoji, "🥚");
+  assert.equal(L.buddyFor(4).title, "Chick");
+  assert.equal(L.buddyFor(99).title, "Dragon");
+  assert.equal(L.buddyFor(99).nextLevel, null);
+  assert.equal(L.buddyFor(5).nextLevel, 8);
+  const s = L.emptyState(); const t = "2026-10-26";
+  assert.ok(L.buddyMood(s, t).includes("sleepy"));
+  s.stats.streak = 3; s.stats.lastDay = "2026-10-25";
+  assert.ok(L.buddyMood(s, t).includes("3-day streak"));
+  s.stats.days[t] = { n: 4, c: 3, p: 0 };
+  assert.ok(L.buddyMood(s, t).includes("6 more"));
+  s.stats.days[t].n = 10;
+  assert.ok(L.buddyMood(s, t).includes("thrilled"));
+});
+
+test("shop: buying, equipping and refunds-never", () => {
+  const s = L.emptyState();
+  assert.ok(Shop.isOwned(s, "palette:Paper") && Shop.isOwned(s, "palette:Night"), "two themes are free");
+  assert.ok(!Shop.isOwned(s, "hat:Crown"));
+  assert.equal(Shop.buyItem(s, "hat:Crown").ok, false);
+  s.stats.points = 300;
+  assert.deepEqual(Shop.buyItem(s, "hat:Crown"), { ok: true, message: "Unlocked Crown!" });
+  assert.equal(s.stats.spent, 250);
+  assert.equal(Shop.buyItem(s, "hat:Crown").ok, false, "can't buy twice");
+  assert.equal(Shop.buyItem(s, "nope").ok, false);
+  assert.ok(Shop.equipItem(s, "hat", "hat:Crown") && s.equipped.hat === "hat:Crown");
+  assert.ok(!Shop.equipItem(s, "hat", "hat:Cap"), "can't wear what you don't own");
+  assert.ok(!Shop.equipItem(s, "palette", "hat:Crown"), "wrong kind");
+  assert.ok(Shop.equipItem(s, "palette", "palette:Night"));
+  assert.ok(Shop.equipItem(s, "palette", "") && s.equipped.palette === "");
+  assert.equal(Shop.ITEMS.filter((i) => i.kind === "palette").length, 20);
+  assert.equal(Shop.ITEMS.filter((i) => i.kind === "font").length, 12);
+  assert.equal(new Set(Shop.ITEMS.map((i) => i.id)).size, Shop.ITEMS.length);
+});
+
+test("saved data: old v1 saves upgrade cleanly and new fields are checked", () => {
+  const v1 = { v: 1, subjects: [{ id: "a", name: "A" }], questions: [], treats: [{ id: "t1", name: "30 minutes of free time", cost: 100 }], settings: { dailyGoal: 5 }, stats: { points: 70 } };
+  const up = L.sanitiseState(v1);
+  assert.equal(up.v, 2); assert.equal(up.stats.points, 70); assert.equal(up.treats.length, 1); assert.deepEqual(up.equipped, { palette: "", font: "", hat: "" });
+  const ids = new Set(Shop.ITEMS.map((i) => i.id));
+  const bad = L.sanitiseState({ owned: ["hat:Crown", "hat:Fake", 7], equipped: { palette: "font:Anton", font: "font:Anton", hat: "hat:Fake" }, claims: { "2026-10-26:days": true, "x:y": true, "2026-10-26:bonus": "yes" }, chests: -4, buddy: { name: "  " }, savedAt: "garbage" }, ids);
+  assert.deepEqual(bad.owned, ["hat:Crown"]);
+  assert.deepEqual(bad.equipped, { palette: "", font: "font:Anton", hat: "" });
+  assert.deepEqual(bad.claims, { "2026-10-26:days": true });
+  assert.equal(bad.chests, 0); assert.equal(bad.buddy.name, "Pip"); assert.equal(bad.savedAt, "");
+  assert.equal(L.sanitiseState({ buddy: { name: "Rex" }, savedAt: "2026-10-26T10:00:00Z" }).buddy.name, "Rex");
+});
+
+test("a goal chest can only be earned once a day, and goals have a minimum", () => {
+  const out = L.sanitiseState({ settings: { dailyGoal: 1 }, stats: { days: { "2026-10-26": { n: 5, c: 4, p: 9, g: true }, "2026-10-27": { n: 1, g: "yes" } } } });
+  assert.equal(out.settings.dailyGoal, 3);
+  assert.equal(out.stats.days["2026-10-26"].g, true);
+  assert.ok(!("g" in out.stats.days["2026-10-27"]));
 });

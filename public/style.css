@@ -16,6 +16,7 @@ body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.5 system
 .wrap { width: min(100% - 2rem, 760px); margin-inline: auto; }
 main { padding: 1.25rem 0 5rem; outline: none; }
 h1, h2, h3 { line-height: 1.2; margin: 0 0 .5rem; }
+h1, h2, .brand, .quiz-q { font-family: var(--font-display, inherit); }
 h1 { font-size: 1.7rem; } h2 { font-size: 1.25rem; } h3 { font-size: 1.05rem; }
 p { margin: 0 0 .75rem; }
 .muted { color: var(--muted); } .small { font-size: .85rem; }
@@ -92,3 +93,42 @@ input:focus, select:focus, textarea:focus { outline: 3px solid var(--accent); ou
 .toast { background: var(--fg); color: var(--bg); padding: .65rem 1rem; border-radius: 12px; font-weight: 600; box-shadow: 0 10px 30px -10px rgb(0 0 0 / 50%); max-width: 30rem; }
 .banner { background: var(--bad-bg); color: var(--bad); border-radius: 12px; padding: .7rem 1rem; margin-bottom: 1rem; font-weight: 600; }
 @media (prefers-reduced-motion: reduce) { .bar-fill { transition: none; } }
+
+/* ---------- account bar ---------- */
+.user { display: flex; align-items: center; gap: .5rem; font-size: .85rem; flex-wrap: wrap; }
+.who { color: var(--muted); font-weight: 600; }
+.sync { color: var(--muted); font-size: .8rem; }
+.sync.warn { color: var(--bad); font-weight: 600; }
+.auth { max-width: 26rem; margin: 2rem auto; }
+.auth .banner { margin: .5rem 0 1rem; }
+
+/* ---------- study buddy ---------- */
+.buddy { position: relative; width: 4.5rem; height: 4.5rem; flex: none; display: grid; place-items: center; background: var(--bg); border-radius: 50%; border: 1px solid var(--border); }
+.buddy .pet { font-size: 2.4rem; line-height: 1; }
+.buddy .hat { position: absolute; top: -.55rem; left: 50%; transform: translateX(-50%) rotate(-8deg); font-size: 1.6rem; line-height: 1; }
+.prize { border-color: var(--accent); }
+
+/* ---------- pick lists, shop ---------- */
+.pick { display: flex; gap: .6rem; align-items: flex-start; padding: .6rem 0; border-top: 1px solid var(--border); font-weight: 400; margin: 0; }
+.pick .a { display: block; color: var(--muted); font-size: .9rem; overflow-wrap: anywhere; }
+.pick > span { min-width: 0; overflow-wrap: anywhere; }
+input[type="checkbox"] { width: 1.25rem; height: 1.25rem; min-height: 0; margin: .2rem 0 0; flex: none; accent-color: var(--accent); }
+.shop { display: grid; gap: .6rem; grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr)); }
+.shop-item { display: grid; gap: .4rem; }
+.swatch { display: flex; align-items: flex-end; min-height: 3.6rem; padding: .5rem .6rem; border-radius: 10px; border: 1px solid var(--border); font-weight: 700; font-size: .95rem; overflow-wrap: anywhere; }
+.swatch.fontsw { align-items: center; background: var(--bg); color: var(--fg); font-size: 1.05rem; font-weight: 400; }
+.swatch.hatsw { flex-direction: column; align-items: center; justify-content: center; background: var(--bg); color: var(--fg); font-size: 1.8rem; gap: .1rem; }
+button[aria-pressed="true"] { cursor: default; }
+
+/* ---------- unlocked colour themes (set by the app from the Shop) ---------- */
+:root[data-palette] {
+  --bg: var(--pal-bg); --fg: var(--pal-ink);
+  --card: color-mix(in oklab, var(--pal-bg) 88%, white);
+  --muted: color-mix(in oklab, var(--pal-ink) 68%, var(--pal-bg));
+  --border: color-mix(in oklab, var(--pal-bg) 72%, var(--pal-ink));
+  --accent: var(--pal-ink); --accent-fg: var(--pal-bg);
+  --good: var(--pal-ink); --good-bg: color-mix(in oklab, var(--pal-bg) 80%, var(--pal-ink));
+  --bad: var(--pal-ink); --bad-bg: color-mix(in oklab, var(--pal-bg) 80%, var(--pal-ink));
+  --shadow: none;
+}
+:root[data-palette] .toast { background: var(--pal-ink); color: var(--pal-bg); }

@@ -1,14 +1,36 @@
 import * as L from "./logic.js";
+import * as Shop from "./shop.js";
+import { CONFIG } from "./config.js";
+import { createCloud, displayName } from "./cloud.js";
 
-const KEY = "revise-app-v1";
+const LOCAL_KEY = "revise-app-v1"; // used when logins aren't switched on, and for progress made before accounts existed
 const TABS = [["home", "🏠", "Home"], ["revise", "📝", "Revise"], ["questions", "✏️", "Questions"], ["rewards", "🏆", "Rewards"]];
 const TAB_IDS = TABS.map((t) => t[0]);
+const CATALOGUE = new Set(Shop.ITEMS.map((i) => i.id));
 
-let state;
+const cloud = createCloud(CONFIG, { storage: safeStorage() });
+let state = null;
+let storeKey = LOCAL_KEY;
 let tab = "home";
 let session = null;
 let storageOk = true;
-const draft = { subjectId: "", newSubject: "", q: "", a: "", wrong: "", bulk: "", filter: "all", search: "", treatName: "", treatCost: "" };
+let booting = true;
+let sync = "idle"; // idle | saving | saved | offline | error
+let syncNote = "";
+let pushTimer = null;
+let retryTimer = null;
+let retryDelay = 15000;
+let lastChest = null;
+const auth = { mode: "in", username: "", password: "", confirm: "", error: "", busy: false };
+const draft = {
+  subjectId: "", newSubject: "", q: "", a: "", wrong: "",
+  topic: "", level: "GCSE", count: "10", style: "mixed", busy: false, aiError: "", prompt: "",
+  paste: "", preview: null, filter: "all", search: "", treatName: "", treatCost: "",
+};
+
+function safeStorage() {
+  try { return globalThis.localStorage || null; } catch { return null; }
+}
 
 // ---------- tiny helper for building page elements (text is always set as text, never as HTML) ----------
 function h(tag, props = {}, ...kids) {
@@ -45,29 +67,182 @@ function toast(message) {
   setTimeout(() => el.remove(), 4200);
 }
 
+// ---------- looks you've unlocked ----------
+function ensureLink(id, href) {
+  let link = document.getElementById(id);
+  if (!link) { link = document.createElement("link"); link.id = id; link.setAttribute("rel", "stylesheet"); document.head.append(link); }
+  if (link.getAttribute("href") !== href) link.setAttribute("href", href);
+}
+function applyLook() {
+  const root = document.documentElement;
+  const eq = state ? state.equipped : { palette: "", font: "", hat: "" };
+  const pal = Shop.itemById(eq.palette);
+  if (pal) {
+    root.setAttribute("data-palette", pal.name.toLowerCase().replace(/\s+/g, "-"));
+    root.style.setProperty("--pal-bg", pal.bg);
+    root.style.setProperty("--pal-ink", pal.ink);
+  } else {
+    root.removeAttribute("data-palette");
+    root.style.removeProperty("--pal-bg");
+    root.style.removeProperty("--pal-ink");
+  }
+  const font = Shop.itemById(eq.font);
+  if (font) {
+    ensureLink("look-font", `https://fonts.googleapis.com/css2?family=${font.family}&display=swap`);
+    root.style.setProperty("--font-display", font.css);
+  } else {
+    root.style.removeProperty("--font-display");
+  }
+}
+function loadFontPreviews() {
+  const families = Shop.itemsOfKind("font").map((f) => `family=${f.family}`).join("&");
+  ensureLink("look-previews", `https://fonts.googleapis.com/css2?${families}&display=swap`);
+}
+
 // ---------- saving ----------
-function load() {
+function readLocal(key) {
+  const store = safeStorage();
+  if (!store) return null;
   let raw = null;
   try {
-    raw = localStorage.getItem(KEY);
-    if (raw) return L.sanitiseState(JSON.parse(raw));
+    raw = store.getItem(key);
+    if (raw) return L.sanitiseState(JSON.parse(raw), CATALOGUE);
   } catch (e) {
     console.warn("Couldn't read saved data", e);
-    try { if (raw) localStorage.setItem(KEY + "-damaged", raw); } catch { /* nothing more we can do */ }
+    try { if (raw) store.setItem(key + "-damaged", raw); } catch { /* nothing more we can do */ }
   }
-  return L.starterState(today());
+  return null;
 }
-function save() {
-  const days = state.stats.days;
-  for (const k of Object.keys(days).sort().slice(0, -200)) delete days[k];
+function writeLocal() {
   try {
-    localStorage.setItem(KEY, JSON.stringify(state));
+    safeStorage().setItem(storeKey, JSON.stringify(state));
     storageOk = true;
   } catch (e) {
     console.warn("Couldn't save", e);
     storageOk = false;
   }
 }
+function save() {
+  if (!state) return;
+  const days = state.stats.days;
+  for (const k of Object.keys(days).sort().slice(0, -200)) delete days[k];
+  for (const k of Object.keys(state.claims).sort().slice(0, -60)) delete state.claims[k];
+  state.savedAt = new Date().toISOString();
+  writeLocal();
+  if (cloud.signedIn) schedulePush(1500);
+}
+function showSync() {
+  const el = document.getElementById("sync");
+  if (!el) return;
+  const text = { saving: "☁ Saving…", saved: "☁ Saved", offline: "☁ Offline — will retry", error: "☁ Not saved — will retry", idle: "" }[sync] || "";
+  el.textContent = text;
+  el.setAttribute("title", syncNote);
+  el.className = "sync" + (sync === "offline" || sync === "error" ? " warn" : "");
+}
+function schedulePush(delay) {
+  sync = "saving";
+  clearTimeout(pushTimer);
+  clearTimeout(retryTimer);
+  pushTimer = setTimeout(push, delay);
+  showSync();
+}
+async function push() {
+  pushTimer = null;
+  if (!cloud.signedIn || !state) return;
+  const stamp = state.savedAt;
+  try {
+    await cloud.saveData(state);
+    retryDelay = 15000;
+    if (state && state.savedAt === stamp && !pushTimer) { sync = "saved"; syncNote = ""; }
+  } catch (e) {
+    if (!cloud.signedIn) { sessionEnded(); return; }
+    sync = e.code === "offline" ? "offline" : "error";
+    syncNote = e.message;
+    clearTimeout(retryTimer);
+    retryTimer = setTimeout(push, retryDelay);
+    retryDelay = Math.min(retryDelay * 2, 120000);
+  }
+  showSync();
+}
+function sessionEnded() {
+  state = null; session = null; sync = "idle";
+  auth.error = "Your session ended — please sign in again.";
+  applyLook();
+  render();
+}
+async function pullIfNewer() {
+  if (!cloud.signedIn || !state || session || pushTimer || sync === "saving") return;
+  try {
+    const row = await cloud.loadData();
+    if (!row || !state || session) return;
+    const remote = L.sanitiseState(row.data, CATALOGUE);
+    if (remote.savedAt > state.savedAt) {
+      state = remote;
+      writeLocal();
+      applyLook();
+      toast("Updated from your other device ✓");
+      render();
+    }
+  } catch { /* try again next time */ }
+}
+
+// ---------- signing in ----------
+async function enterApp() {
+  storeKey = `revise-app-v2-${cloud.user.id}`;
+  const cached = readLocal(storeKey);
+  let remote = null;
+  let note = "";
+  try {
+    const row = await cloud.loadData();
+    if (row) remote = L.sanitiseState(row.data, CATALOGUE);
+    sync = "saved";
+  } catch (e) {
+    if (!cloud.signedIn) { sessionEnded(); return; }
+    sync = e.code === "offline" ? "offline" : "error";
+    syncNote = note = e.message;
+  }
+  const old = readLocal(LOCAL_KEY); // progress made on this device before accounts existed
+  let adopted = false;
+  if (remote && cached) state = cached.savedAt > remote.savedAt ? cached : remote;
+  else state = remote || cached;
+  const needPush = !remote || state !== remote;
+  if (!state) { state = old || L.starterState(today()); adopted = Boolean(old); }
+  booting = false;
+  tab = TAB_IDS.includes(location.hash.slice(1)) ? location.hash.slice(1) : "home";
+  auth.password = ""; auth.confirm = ""; auth.error = "";
+  applyLook();
+  if (needPush || adopted) save(); else writeLocal();
+  if (adopted) toast("Progress from this device was moved into your account ✓");
+  render();
+  if (note) toast(note);
+}
+async function submitAuth() {
+  if (auth.busy) return;
+  const username = auth.username.trim();
+  auth.error = "";
+  if (!username || !auth.password) { auth.error = "Enter a username and password."; return render(); }
+  if (auth.mode === "up" && auth.password !== auth.confirm) { auth.error = "The two passwords don't match."; return render(); }
+  auth.busy = true; render();
+  try {
+    if (auth.mode === "up") await cloud.signUp(username, auth.password); else await cloud.signIn(username, auth.password);
+    auth.busy = false;
+    await enterApp();
+  } catch (e) {
+    auth.busy = false;
+    auth.error = e.message || "Something went wrong.";
+    render();
+  }
+}
+async function signOut() {
+  if (pushTimer) { clearTimeout(pushTimer); await push(); }
+  clearTimeout(retryTimer);
+  await cloud.signOut();
+  auth.mode = "in"; auth.password = ""; auth.confirm = ""; auth.error = "";
+  state = null; session = null; sync = "idle";
+  applyLook();
+  render();
+}
+
 function checkBadges() {
   for (const id of L.newBadges(state)) {
     const b = L.BADGES.find((x) => x.id === id);
@@ -77,8 +252,9 @@ function checkBadges() {
   }
 }
 
-// ---------- navigation ----------
+// ---------- navigation and page frame ----------
 function go(id) {
+  if (id !== tab) lastChest = null;
   tab = id;
   if (location.hash !== "#" + id) location.hash = id;
   render();
@@ -86,18 +262,57 @@ function go(id) {
 }
 function render() {
   const nav = document.getElementById("nav");
+  const user = document.getElementById("user");
   const app = document.getElementById("app");
-  nav.replaceChildren(...TABS.map(([id, icon, label]) =>
+  const inApp = Boolean(state) && !booting;
+  nav.replaceChildren(...(inApp ? TABS.map(([id, icon, label]) =>
     h("button", { type: "button", class: "tab" + (tab === id ? " active" : ""), "aria-current": tab === id ? "page" : undefined, onclick: () => go(id) },
-      h("span", { "aria-hidden": "true" }, icon), h("span", {}, label))));
-  const views = { home: viewHome, revise: viewRevise, questions: viewQuestions, rewards: viewRewards };
+      h("span", { "aria-hidden": "true" }, icon), h("span", {}, label))) : []));
+  user.replaceChildren(...(inApp && cloud.signedIn ? [
+    h("span", { id: "sync", class: "sync" }),
+    h("span", { class: "who" }, `👤 ${displayName(cloud.user.email, CONFIG.usernameDomain)}`),
+    h("button", { class: "small ghost", onclick: signOut }, "Sign out"),
+  ] : []));
+  let view;
+  if (booting) view = h("p", { class: "muted" }, "Loading…");
+  else if (!state) view = viewAuth();
+  else view = { home: viewHome, revise: viewRevise, questions: viewQuestions, rewards: viewRewards }[tab]();
   app.replaceChildren(...[
-    !storageOk && h("div", { class: "banner", role: "alert" }, "This browser isn't letting the app save. Your progress will be lost when you close the page — try turning off private browsing."),
-    views[tab](),
+    inApp && !storageOk && h("div", { class: "banner", role: "alert" }, "This browser isn't letting the app save on this device. " + (cloud.signedIn ? "Your account copy is still saved." : "Your progress will be lost when you close the page — try turning off private browsing.")),
+    view,
   ].filter(Boolean));
+  showSync();
+}
+
+// ======================= SIGN IN =======================
+function viewAuth() {
+  const up = auth.mode === "up";
+  const field = (label, key, type, extra = {}) =>
+    h("label", {}, label, h("input", { type, value: auth[key], maxlength: 60, autocapitalize: "off", spellcheck: "false", ...extra,
+      oninput: (e) => { auth[key] = e.target.value; },
+      onkeydown: (e) => { if (e.key === "Enter") submitAuth(); } }));
+  return h("section", { class: "card auth" },
+    h("h1", {}, "📝 Revise"),
+    h("p", { class: "muted" }, "Sign in to keep your questions, points and streak safe on every device."),
+    h("div", { class: "row", role: "tablist" },
+      h("button", { class: up ? "" : "primary", onclick: () => { auth.mode = "in"; auth.error = ""; render(); } }, "Sign in"),
+      h("button", { class: up ? "primary" : "", onclick: () => { auth.mode = "up"; auth.error = ""; render(); } }, "Create account")),
+    h("div", { style: "margin-top:1rem" },
+      field("Username", "username", "text", { autocomplete: "username", placeholder: "e.g. jamie_t" }),
+      field("Password", "password", "password", { autocomplete: up ? "new-password" : "current-password" }),
+      up && field("Repeat password", "confirm", "password", { autocomplete: "new-password" })),
+    auth.error && h("div", { class: "banner", role: "alert" }, auth.error),
+    h("button", { class: "primary big", disabled: auth.busy, onclick: submitAuth }, auth.busy ? "One moment…" : up ? "Create account" : "Sign in"),
+    up && h("p", { class: "small muted", style: "margin-top:.75rem" }, "No email needed. Because of that there's no “forgot password”, so choose one you'll remember. Use 3–30 letters, numbers, dots, dashes or underscores for your username."));
 }
 
 // ======================= HOME =======================
+function buddyEl() {
+  const lvl = L.levelFor(state.stats.points);
+  const b = L.buddyFor(lvl.level);
+  const hat = Shop.itemById(state.equipped.hat);
+  return h("div", { class: "buddy", "aria-hidden": "true" }, hat && h("span", { class: "hat" }, hat.emoji), h("span", { class: "pet" }, b.emoji));
+}
 function viewHome() {
   const t = today();
   const s = state.stats;
@@ -110,6 +325,8 @@ function viewHome() {
   const weekMax = Math.max(goal, ...week.map((d) => d.n));
   const progress = L.subjectProgress(state, t);
   const earned = L.BADGES.filter((b) => s.badges[b.id]).sort((a, b) => s.badges[b.id].localeCompare(s.badges[a.id])).slice(0, 4);
+  const buddy = L.buddyFor(lvl.level);
+  const claimable = L.weeklyQuests(state, t).filter((q) => q.done && !q.claimed).length;
 
   const cta = !state.questions.length
     ? h("button", { class: "primary big", onclick: () => go("questions") }, "Add your first questions")
@@ -117,17 +334,25 @@ function viewHome() {
 
   return h("div", {},
     h("section", { class: "card" },
-      h("h1", {}, streak >= 2 ? `🔥 ${streak} day streak!` : "Ready to revise?"),
-      h("div", { class: "grid2" },
+      h("div", { class: "row" },
+        buddyEl(),
+        h("div", { class: "grow" },
+          h("h1", {}, streak >= 2 ? `🔥 ${streak} day streak!` : "Ready to revise?"),
+          h("p", { class: "muted", style: "margin:0" }, `${state.buddy.name} the ${buddy.title} ${L.buddyMood(state, t)}`))),
+      h("div", { class: "grid2", style: "margin-top:.9rem" },
         h("div", { class: "stat" }, h("b", {}, `Level ${lvl.level}`), h("span", {}, `${s.points} points`)),
         h("div", { class: "stat" }, h("b", {}, streak), h("span", {}, "day streak")),
         h("div", { class: "stat" }, h("b", {}, s.answered ? `${Math.round((s.correct / s.answered) * 100)}%` : "–"), h("span", {}, "answered right"))),
       h("p", { class: "small muted", style: "margin-top:.75rem" }, `${lvl.next - s.points} points to level ${lvl.level + 1}`),
       bar(lvl.pct, "Progress to next level")),
+    (state.chests > 0 || claimable > 0) && h("section", { class: "card prize" },
+      h("div", { class: "row space" },
+        h("div", {}, state.chests > 0 && h("b", {}, `🎁 You have ${plural(state.chests, "chest")} to open!`), state.chests > 0 && claimable > 0 && h("br"), claimable > 0 && h("b", {}, `📜 ${plural(claimable, "quest reward")} ready to claim`)),
+        h("button", { class: "primary", onclick: () => go("rewards") }, "Go to rewards"))),
     h("section", { class: "card" },
       h("div", { class: "row space" }, h("h2", {}, "Today"), h("span", { class: "muted small" }, `${day.n} of ${goal} questions`)),
       bar(Math.round((day.n / goal) * 100), "Today's goal"),
-      h("p", { class: "small muted", style: "margin:.5rem 0 1rem" }, day.n >= goal ? `Goal reached! 🎉 You've earned ${day.p} points today.` : `${goal - day.n} more to reach your daily goal (+${L.GOAL_BONUS} bonus points).`),
+      h("p", { class: "small muted", style: "margin:.5rem 0 1rem" }, day.g || day.n >= goal ? "Goal reached! 🎉 Today's chest is yours." : `${goal - day.n} more to reach your daily goal and earn a chest 🎁.`),
       cta),
     h("section", { class: "card" },
       h("h2", {}, "This week"),
@@ -193,7 +418,7 @@ function startSession(subjectId, length) {
   const { picked } = L.pickQuestions(state.questions, { subjectId, count, today: t });
   if (!picked.length) return toast("There are no questions in that subject yet.");
   session = {
-    queue: picked.map((q) => ({ id: q.id, retry: false })), index: 0, combo: 0, results: [], pointsEarned: 0, bonus: 0,
+    queue: picked.map((q) => ({ id: q.id, retry: false })), index: 0, combo: 0, results: [], pointsEarned: 0, chests: 0,
     stage: "ask", verdict: false, given: "", dontKnow: false, finished: false, newBadges: [], shown: null,
   };
   render();
@@ -226,7 +451,7 @@ function viewQuestion() {
       session.combo >= 2 && h("span", { class: "tag" }, `🔥 ${session.combo} in a row`)),
     bar(Math.round((session.index / total) * 100), "Round progress"));
 
-  const body = h("div", {}, 
+  const body = h("div", {},
     h("div", { class: "row", style: "margin-top:.8rem" }, h("span", { class: "tag" }, subject ? subject.name : "Question"), item.retry && h("span", { class: "tag" }, "Second chance — no points")),
     h("p", { class: "quiz-q" }, q.q));
 
@@ -284,14 +509,15 @@ function commit(correct) {
     const d = s.days[t];
     d.n++;
     if (correct) {
+      d.c++;
       const pts = L.pointsFor(session.combo);
       s.points += pts; d.p += pts; session.pointsEarned += pts; session.combo++;
     } else {
       session.combo = 0;
     }
-    if (d.n === state.settings.dailyGoal) {
-      s.points += L.GOAL_BONUS; d.p += L.GOAL_BONUS; s.goalDays++; session.bonus += L.GOAL_BONUS;
-      toast(`🎯 Daily goal reached! +${L.GOAL_BONUS} bonus points`);
+    if (d.n >= state.settings.dailyGoal && !d.g) {
+      d.g = true; state.chests++; s.goalDays++; session.chests++;
+      toast("🎁 Daily goal reached! You earned a chest");
     }
     session.results.push(correct);
     if (!correct) session.queue.splice(Math.min(session.queue.length, session.index + 4), 0, { id: q.id, retry: true }); // see it again shortly
@@ -327,20 +553,22 @@ function viewSummary() {
     h("h1", {}, pct === 100 && total >= 5 ? "Perfect round! 🎯" : pct >= 70 ? "Nice work! 🎉" : "Round complete 💪"),
     h("div", { class: "grid2" },
       h("div", { class: "stat" }, h("b", {}, `${right}/${total}`), h("span", {}, "right first time")),
-      h("div", { class: "stat" }, h("b", {}, `+${session.pointsEarned + session.bonus}`), h("span", {}, "points")),
+      h("div", { class: "stat" }, h("b", {}, `+${session.pointsEarned}`), h("span", {}, "points")),
       h("div", { class: "stat" }, h("b", {}, L.currentStreak(state.stats, today())), h("span", {}, "day streak"))),
+    session.chests > 0 && h("p", { class: "verdict good", style: "margin-top:1rem" }, "🎁 You earned a chest for reaching your daily goal — open it in Rewards!"),
     badges.length > 0 && h("div", { style: "margin-top:1rem" }, h("h3", {}, "New badges"),
       h("div", { class: "badges" }, badges.map((b) => h("div", { class: "badge" }, h("span", { class: "ico", "aria-hidden": "true" }, b.icon), h("b", {}, b.name), h("span", { class: "small muted" }, b.text))))),
     total - right > 0 && h("p", { class: "muted", style: "margin-top:1rem" }, `The ${plural(total - right, "question")} you missed will come back soon.`),
     h("div", { class: "row", style: "margin-top:1rem" },
       h("button", { class: "primary", onclick: () => { session = null; render(); } }, "Another round"),
+      session.chests > 0 && h("button", { onclick: () => { session = null; go("rewards"); } }, "Open chest"),
       h("button", { onclick: () => { session = null; go("home"); } }, "Back home")));
 }
 
 // ======================= QUESTIONS =======================
-function ensureSubject() {
+function ensureSubject(fallbackName = "") {
   if (draft.subjectId === "__new" || !state.subjects.length) {
-    const name = draft.newSubject.trim().slice(0, 60);
+    const name = (draft.newSubject.trim() || fallbackName.trim()).slice(0, 60);
     if (!name) { toast("Give the new subject a name first."); return null; }
     const existing = state.subjects.find((s) => s.name.toLowerCase() === name.toLowerCase());
     if (existing) { draft.subjectId = existing.id; return existing.id; }
@@ -352,9 +580,8 @@ function ensureSubject() {
   }
   return draft.subjectId;
 }
-function makeQuestion(subjectId, q, a, choices = []) {
-  return { id: L.uid(), subjectId, q, a, choices, box: 1, due: today(), right: 0, wrong: 0 };
-}
+const makeQuestion = (subjectId, q, a, choices = []) => ({ id: L.uid(), subjectId, q, a, choices, box: 1, due: today(), right: 0, wrong: 0 });
+
 function addQuestion() {
   const q = draft.q.trim();
   const a = draft.a.trim();
@@ -371,17 +598,52 @@ function addQuestion() {
   render();
   setTimeout(() => document.getElementById("new-q")?.focus(), 0);
 }
-function addBulk() {
-  const { items, skipped } = L.parseBulk(draft.bulk);
-  if (!items.length) return toast("Nothing to add — write each one as: question | answer");
-  const subjectId = ensureSubject();
+
+function setPreview(source, items, skipped = 0) {
+  const real = state.subjects.some((s) => s.id === draft.subjectId) ? draft.subjectId : "";
+  const marked = L.markDuplicates(items, state.questions, real);
+  draft.preview = { source, skipped, items: marked.map((it) => ({ ...it, keep: !it.duplicate })) };
+}
+function checkPaste() {
+  const r = L.parseQuestionList(draft.paste);
+  if (!r.items.length) return toast("I couldn't find any questions in that. Try one per line like:  question | answer");
+  setPreview("paste", r.items, r.skipped);
+  render();
+}
+async function makeWithAi() {
+  const topic = draft.topic.trim();
+  if (!topic) return toast("Type a topic first.");
+  draft.busy = true; draft.aiError = ""; render();
+  try {
+    const r = await cloud.generate({ topic, level: draft.level, count: Number(draft.count), style: draft.style });
+    const items = (Array.isArray(r && r.questions) ? r.questions : []).filter((x) => x && x.q && x.a);
+    if (!items.length) throw new Error("Nothing came back — try again.");
+    setPreview("ai", items);
+  } catch (e) {
+    draft.aiError = e.message || "Something went wrong.";
+    if (!cloud.signedIn) { draft.busy = false; return sessionEnded(); }
+  }
+  draft.busy = false;
+  render();
+}
+async function copyPrompt() {
+  draft.prompt = L.buildAiPrompt({ topic: draft.topic, level: draft.level, count: Number(draft.count), style: draft.style });
+  let copied = false;
+  try { await navigator.clipboard.writeText(draft.prompt); copied = true; } catch { copied = false; }
+  toast(copied ? "Prompt copied — paste it into another AI ✓" : "Copy the prompt from the box below.");
+  render();
+}
+function addPreview() {
+  const keep = draft.preview.items.filter((it) => it.keep);
+  if (!keep.length) return toast("Tick at least one question to add.");
+  const subjectId = ensureSubject(draft.topic);
   if (!subjectId) return;
-  for (const it of items) state.questions.push(makeQuestion(subjectId, it.q, it.a));
-  state.stats.created += items.length;
-  draft.bulk = "";
+  for (const it of keep) state.questions.push(makeQuestion(subjectId, it.q, it.a, it.choices || []));
+  state.stats.created += keep.length;
+  draft.preview = null; draft.paste = ""; draft.prompt = "";
   checkBadges();
   save();
-  toast(`Added ${plural(items.length, "question")}${skipped ? ` (${skipped} skipped)` : ""} ✓`);
+  toast(`Added ${plural(keep.length, "question")} ✓`);
   render();
 }
 function deleteQuestion(id) {
@@ -407,29 +669,65 @@ function viewQuestions() {
   if (draft.subjectId !== "__new" && !state.subjects.some((s) => s.id === draft.subjectId)) draft.subjectId = state.subjects[0] ? state.subjects[0].id : "__new";
   if (draft.filter !== "all" && !state.subjects.some((s) => s.id === draft.filter)) draft.filter = "all";
 
-  const subjectPicker = h("div", {},
-    state.subjects.length > 0 && h("label", {}, "Subject",
+  const subjectCard = h("section", { class: "card" },
+    h("h2", {}, "Which subject?"),
+    h("p", { class: "muted small" }, "New questions go into this subject."),
+    state.subjects.length > 0 && h("label", {}, "Add to",
       h("select", { id: "form-subject", onchange: (e) => { draft.subjectId = e.target.value; render(); } },
         state.subjects.map((s) => h("option", { value: s.id, selected: s.id === draft.subjectId }, s.name)),
         h("option", { value: "__new", selected: draft.subjectId === "__new" }, "＋ New subject…"))),
     (draft.subjectId === "__new" || !state.subjects.length) && h("label", {}, "New subject name",
-      h("input", { type: "text", maxlength: 60, placeholder: "e.g. Biology", value: draft.newSubject, oninput: (e) => { draft.newSubject = e.target.value; } })));
+      h("input", { type: "text", maxlength: 60, placeholder: "e.g. Biology (leave blank to use the topic below)", value: draft.newSubject, oninput: (e) => { draft.newSubject = e.target.value; } })));
 
-  const form = h("section", { class: "card" },
-    h("h2", {}, "Add a question"),
-    subjectPicker,
+  const opt = (value, label, current) => h("option", { value, selected: value === current }, label);
+  const makeCard = h("section", { class: "card" },
+    h("h2", {}, "Make questions on a topic"),
+    h("p", { class: "muted small" }, "Type what you're revising and the app can write the questions for you — or copy a ready-made prompt for any other AI."),
+    h("label", {}, "Topic", h("input", { type: "text", maxlength: 120, placeholder: "e.g. Photosynthesis, or The causes of World War 1", value: draft.topic, oninput: (e) => { draft.topic = e.target.value; },
+      onkeydown: (e) => { if (e.key === "Enter" && cloud.enabled) makeWithAi(); } })),
+    h("div", { class: "grid2" },
+      h("label", {}, "Level", h("select", { onchange: (e) => { draft.level = e.target.value; } }, L.LEVELS.map((x) => opt(x, x, draft.level)))),
+      h("label", {}, "How many", h("select", { onchange: (e) => { draft.count = e.target.value; } }, ["5", "10", "15"].map((x) => opt(x, x, draft.count)))),
+      h("label", {}, "Style", h("select", { onchange: (e) => { draft.style = e.target.value; } }, [["mixed", "Mix of both"], ["typed", "Type the answer"], ["choice", "Multiple choice"]].map(([v, l]) => opt(v, l, draft.style))))),
+    draft.aiError && h("div", { class: "banner", role: "alert" }, draft.aiError),
+    h("div", { class: "row" },
+      cloud.enabled && h("button", { class: "primary", disabled: draft.busy, onclick: makeWithAi }, draft.busy ? "Writing questions…" : "✨ Make questions for me"),
+      h("button", { onclick: copyPrompt }, "Copy a prompt for another AI")),
+    !cloud.enabled && h("p", { class: "small muted", style: "margin:.6rem 0 0" }, "Making questions inside the app needs sign-in to be switched on (see README). Until then, copy the prompt, paste it into another AI, and paste its answer below."),
+    cloud.enabled && h("p", { class: "small muted", style: "margin:.6rem 0 0" }, "AI can make mistakes — check the answers against your notes before adding them."),
+    draft.prompt && h("label", { style: "margin-top:.8rem" }, "Prompt to copy",
+      h("textarea", { readonly: true, style: "min-height:11rem", onfocus: (e) => e.target.select?.() }, draft.prompt)));
+
+  const pasteCard = h("section", { class: "card" },
+    h("h2", {}, "Paste a list of questions"),
+    h("p", { class: "muted small" }, "Paste what another AI wrote, or rows from a spreadsheet. One per line, like  Capital of Spain | Madrid | Paris | Rome | Lisbon  (the last three are optional wrong options). Tables, Q:/A: lists and JSON work too."),
+    h("textarea", { "aria-label": "Questions to add", style: "min-height:8rem", placeholder: "What is 7 x 8? | 56\nCapital of Italy | Rome | Milan | Turin | Pisa", oninput: (e) => { draft.paste = e.target.value; } }, draft.paste),
+    h("button", { style: "margin-top:.6rem", onclick: checkPaste }, "Check the list"));
+
+  let previewCard = null;
+  if (draft.preview) {
+    const p = draft.preview;
+    const picked = p.items.filter((it) => it.keep).length;
+    previewCard = h("section", { class: "card prize" },
+      h("h2", {}, `Check these before adding (${p.items.length})`),
+      p.source === "ai" && h("p", { class: "small muted" }, "Made by AI — untick anything that looks wrong."),
+      p.skipped > 0 && h("p", { class: "small muted" }, `${plural(p.skipped, "line")} couldn't be read and ${p.skipped === 1 ? "was" : "were"} skipped.`),
+      p.items.map((it) => h("label", { class: "pick" },
+        h("input", { type: "checkbox", checked: it.keep, onchange: (e) => { it.keep = e.target.checked; render(); } }),
+        h("span", {}, h("b", {}, it.q), h("span", { class: "a" }, `Answer: ${it.a}${it.choices && it.choices.length ? `  ·  wrong options: ${it.choices.join(", ")}` : ""}`), it.duplicate && h("span", { class: "tag" }, "already in this subject")))),
+      h("div", { class: "row", style: "margin-top:.8rem" },
+        h("button", { class: "primary", onclick: addPreview }, `Add ${plural(picked, "question")}`),
+        h("button", { onclick: () => { draft.preview = null; render(); } }, "Cancel")));
+  }
+
+  const oneCard = h("section", { class: "card" },
+    h("h2", {}, "Add one question"),
     h("label", {}, "Question", h("textarea", { id: "new-q", maxlength: 500, placeholder: "What is the powerhouse of the cell?", oninput: (e) => { draft.q = e.target.value; } }, draft.q)),
     h("label", {}, "Answer", h("input", { type: "text", maxlength: 300, placeholder: "Mitochondria", value: draft.a, oninput: (e) => { draft.a = e.target.value; },
       onkeydown: (e) => { if (e.key === "Enter") addQuestion(); } }),
       h("span", { class: "small muted" }, "Tip: write several accepted answers with a semicolon, like  7; seven")),
     h("label", {}, "Wrong options (optional)", h("textarea", { maxlength: 1000, placeholder: "One per line. Fill these in to make it multiple choice.", oninput: (e) => { draft.wrong = e.target.value; } }, draft.wrong)),
     h("button", { class: "primary", onclick: addQuestion }, "Add question"));
-
-  const bulk = h("section", { class: "card" },
-    h("h2", {}, "Add lots at once"),
-    h("p", { class: "muted small" }, "Paste one per line, like  Capital of Spain | Madrid  (uses the subject chosen above). Handy for pasting from a spreadsheet, too."),
-    h("textarea", { "aria-label": "Questions to add", style: "min-height:8rem", placeholder: "What is 7 x 8? | 56\nCapital of Italy | Rome", oninput: (e) => { draft.bulk = e.target.value; } }, draft.bulk),
-    h("button", { style: "margin-top:.6rem", onclick: addBulk }, "Add all"));
 
   const listBox = h("div", {});
   const fillList = () => {
@@ -459,14 +757,14 @@ function viewQuestions() {
   const importInput = h("input", { type: "file", accept: "application/json,.json", hidden: true, onchange: importData });
   const data = h("section", { class: "card" },
     h("h2", {}, "Backup"),
-    h("p", { class: "muted small" }, "Everything is saved in this browser on this device. Download a backup now and then — you can load it on another device or after clearing your browser."),
+    h("p", { class: "muted small" }, cloud.signedIn ? "Your account saves everything automatically. You can also keep a file copy." : "Everything is saved in this browser on this device. Download a backup now and then."),
     h("div", { class: "row" },
       h("button", { onclick: exportData }, "Download backup"),
       h("button", { onclick: () => importInput.click() }, "Load a backup"),
       h("button", { class: "danger", onclick: resetAll }, "Erase everything"),
       importInput));
 
-  return h("div", {}, form, bulk, list, data);
+  return h("div", {}, subjectCard, makeCard, pasteCard, previewCard, oneCard, list, data);
 }
 
 function exportData() {
@@ -483,11 +781,12 @@ async function importData(e) {
   e.target.value = "";
   if (!file) return;
   try {
-    const next = L.sanitiseState(JSON.parse(await file.text()));
+    const next = L.sanitiseState(JSON.parse(await file.text()), CATALOGUE);
     if (!confirm(`Replace everything with this backup (${plural(next.questions.length, "question")}, ${next.stats.points} points)?`)) return;
     state = next;
     session = null;
     save();
+    applyLook();
     toast("Backup loaded ✓");
     render();
   } catch (err) {
@@ -495,10 +794,11 @@ async function importData(e) {
   }
 }
 function resetAll() {
-  if (!confirm("Erase all your questions, points and badges? This can't be undone.")) return;
+  if (!confirm("Erase all your questions, points, badges and unlocked items? This can't be undone.")) return;
   state = L.emptyState();
   session = null;
   save();
+  applyLook();
   render();
 }
 
@@ -509,18 +809,92 @@ function viewRewards() {
   const lvl = L.levelFor(s.points);
   const balance = s.points - s.spent;
   const streak = L.currentStreak(s, t);
+  const buddy = L.buddyFor(lvl.level);
+  loadFontPreviews();
 
-  const goalInput = h("input", { type: "number", min: 1, max: 200, value: state.settings.dailyGoal, "aria-label": "Daily goal in questions",
-    onchange: (e) => {
-      const n = Math.round(Number(e.target.value));
-      state.settings.dailyGoal = Number.isFinite(n) ? Math.min(200, Math.max(1, n)) : L.DEFAULT_GOAL;
-      save();
-      render();
-    } });
+  const nameInput = h("input", { type: "text", maxlength: 20, value: state.buddy.name, "aria-label": "Your buddy's name",
+    onchange: (e) => { state.buddy.name = e.target.value.trim().slice(0, 20) || "Pip"; save(); render(); } });
+  const buddyCard = h("section", { class: "card" },
+    h("div", { class: "row" },
+      buddyEl(),
+      h("div", { class: "grow" },
+        h("h1", {}, `${state.buddy.name} the ${buddy.title}`),
+        h("p", { class: "muted", style: "margin:0" }, `Level ${lvl.level}${buddy.nextLevel ? ` · evolves at level ${buddy.nextLevel}` : " · fully grown!"}`))),
+    bar(lvl.pct, "Progress to next level"),
+    h("p", { class: "small muted", style: "margin:.4rem 0 1rem" }, `${lvl.next - s.points} points to level ${lvl.level + 1}`),
+    h("div", { class: "grid2" },
+      h("div", { class: "stat" }, h("b", {}, balance), h("span", {}, "points to spend")),
+      h("div", { class: "stat" }, h("b", {}, s.points), h("span", {}, "points earned")),
+      h("div", { class: "stat" }, h("b", {}, streak), h("span", {}, "day streak")),
+      h("div", { class: "stat" }, h("b", {}, s.bestStreak), h("span", {}, "best streak"))),
+    h("label", { style: "margin-top:1rem" }, "Rename your buddy", nameInput));
 
-  const addTreat = () => {
-    const name = draft.treatName.trim().slice(0, 60);
-    const cost = Math.round(Number(draft.treatCost));
+  const openChest = () => {
+    const pts = L.openChest(state);
+    if (pts === null) return;
+    lastChest = pts;
+    checkBadges();
+    save();
+    render();
+  };
+  const chestCard = h("section", { class: "card prize" },
+    h("h2", {}, "🎁 Chests"),
+    lastChest !== null && h("p", { class: "verdict good", role: "status" }, `You found ${lastChest} points! 🎉`),
+    state.chests > 0
+      ? h("div", { class: "row space" }, h("span", {}, `You have ${plural(state.chests, "chest")} waiting.`), h("button", { class: "primary", onclick: openChest }, "Open a chest"))
+      : h("p", { class: "muted", style: "margin:0" }, `No chests yet. Answer ${state.settings.dailyGoal} questions in a day — or finish all three weekly quests — to earn one. Each holds 20–150 points.`));
+
+  const claim = (q) => {
+    const r = L.claimQuest(state, q.id, t);
+    if (!r.ok) return;
+    toast(`+${r.points} points!${r.chest ? " 🎁 Bonus chest for finishing every quest!" : ""}`);
+    checkBadges();
+    save();
+    render();
+  };
+  const quests = L.weeklyQuests(state, t);
+  const questCard = h("section", { class: "card" },
+    h("div", { class: "row space" }, h("h2", {}, "📜 Weekly quests"), h("span", { class: "small muted" }, `Resets Monday`)),
+    quests.map((q) => h("div", { class: "item" },
+      h("div", { class: "txt grow" },
+        h("b", {}, q.text), h("div", { class: "small muted" }, `${Math.min(q.progress, q.target)} / ${q.target} · ${q.reward} points`),
+        bar(Math.round((q.progress / q.target) * 100), q.text)),
+      q.claimed ? h("span", { class: "tag" }, "Claimed ✓")
+        : h("button", { class: "primary small", disabled: !q.done, onclick: () => claim(q) }, q.done ? "Claim" : "In progress"))),
+    h("p", { class: "small muted", style: "margin:.6rem 0 0" }, "Claim all three this week for a bonus chest."));
+
+  const owned = (id) => Shop.isOwned(state, id);
+  const use = (kind, id) => { Shop.equipItem(state, kind, id); save(); applyLook(); render(); };
+  const buy = (id) => {
+    const r = Shop.buyItem(state, id);
+    toast(r.message);
+    if (r.ok) { save(); render(); }
+  };
+  const shopButton = (item) => {
+    const on = state.equipped[item.kind] === item.id;
+    if (owned(item.id)) return h("button", { class: on ? "primary small" : "small", "aria-pressed": on, onclick: () => use(item.kind, item.id) }, on ? "In use ✓" : "Use");
+    return h("button", { class: "small", disabled: balance < item.price, onclick: () => buy(item.id) }, `Unlock · ${item.price} pts`);
+  };
+  const originalBtn = (kind, label) => h("button", { class: "small ghost", disabled: !state.equipped[kind], onclick: () => use(kind, "") }, label);
+  const shopCard = h("section", { class: "card" },
+    h("h2", {}, "🛍️ Shop"),
+    h("p", { class: "muted small" }, `Spend points on looks for the whole app. You have ${balance} points. Spending doesn't lower your level.`),
+    h("div", { class: "row space" }, h("h3", {}, "Colour themes"), originalBtn("palette", "Use original colours")),
+    h("div", { class: "shop" }, Shop.itemsOfKind("palette").map((p) => h("div", { class: "shop-item" },
+      h("div", { class: "swatch", style: `background:${p.bg};color:${p.ink};border-color:${p.ink}` }, p.name),
+      shopButton(p)))),
+    h("div", { class: "row space", style: "margin-top:1.2rem" }, h("h3", {}, "Headline fonts"), originalBtn("font", "Use original font")),
+    h("div", { class: "shop" }, Shop.itemsOfKind("font").map((f) => h("div", { class: "shop-item" },
+      h("div", { class: "swatch fontsw", style: `font-family:${f.css}` }, f.name),
+      shopButton(f)))),
+    h("div", { class: "row space", style: "margin-top:1.2rem" }, h("h3", {}, `Hats for ${state.buddy.name}`), originalBtn("hat", "Take hat off")),
+    h("div", { class: "shop" }, Shop.itemsOfKind("hat").map((x) => h("div", { class: "shop-item" },
+      h("div", { class: "swatch hatsw" }, h("span", { "aria-hidden": "true" }, x.emoji), h("span", { class: "small" }, x.name)),
+      shopButton(x)))));
+
+  const addTreat = (name, cost) => {
+    name = String(name).trim().slice(0, 60);
+    cost = Math.round(Number(cost));
     if (!name || !Number.isFinite(cost) || cost < 1) return toast("Give the reward a name and a points cost.");
     if (state.treats.length >= 30) return toast("That's plenty of rewards — remove one first.");
     state.treats.push({ id: L.uid(), name, cost: Math.min(100000, cost) });
@@ -537,55 +911,68 @@ function viewRewards() {
     toast(`Enjoy: ${tr.name} 🎉`);
     render();
   };
+  const treatCard = h("section", { class: "card" },
+    h("h2", {}, "🎉 Real-life rewards"),
+    h("p", { class: "muted small" }, "Treats you give yourself in real life — you decide the price, then redeem when you've saved up."),
+    state.treats.length === 0 && h("p", { class: "muted" }, "None yet. Tap an idea or add your own:"),
+    state.treats.map((tr) => h("div", { class: "item" },
+      h("div", { class: "txt" }, h("b", {}, tr.name), h("div", { class: "a" }, `${tr.cost} points`)),
+      h("div", { class: "row" },
+        h("button", { class: "primary small", disabled: balance < tr.cost, onclick: () => redeem(tr) }, "Redeem"),
+        h("button", { class: "ghost small danger", "aria-label": `Remove reward ${tr.name}`, onclick: () => { state.treats = state.treats.filter((x) => x.id !== tr.id); save(); render(); } }, "✕")))),
+    h("div", { class: "row", style: "margin:.6rem 0" }, L.TREAT_IDEAS.filter((i) => !state.treats.some((x) => x.name === i.name)).map((i) => h("button", { class: "small", onclick: () => addTreat(i.name, i.cost) }, `＋ ${i.name} (${i.cost})`))),
+    h("div", { class: "row" },
+      h("input", { class: "grow", type: "text", maxlength: 60, placeholder: "Your own reward, e.g. Buy a new book", "aria-label": "Reward name", value: draft.treatName, oninput: (e) => { draft.treatName = e.target.value; } }),
+      h("input", { style: "max-width:8rem", type: "number", min: 1, placeholder: "Points", "aria-label": "Points cost", value: draft.treatCost, oninput: (e) => { draft.treatCost = e.target.value; } }),
+      h("button", { onclick: () => addTreat(draft.treatName, draft.treatCost) }, "Add")),
+    state.redeemed.length > 0 && h("div", { style: "margin-top:1rem" }, h("h3", {}, "Recently enjoyed"),
+      state.redeemed.slice(0, 5).map((r) => h("p", { class: "small muted", style: "margin:0" }, `${niceDate(r.date)} — ${r.name} (${r.cost} points)`))));
 
-  return h("div", {},
-    h("section", { class: "card" },
-      h("h1", {}, `Level ${lvl.level}`),
-      bar(lvl.pct, "Progress to next level"),
-      h("p", { class: "small muted", style: "margin:.4rem 0 1rem" }, `${lvl.next - s.points} points to level ${lvl.level + 1}`),
-      h("div", { class: "grid2" },
-        h("div", { class: "stat" }, h("b", {}, s.points), h("span", {}, "points earned")),
-        h("div", { class: "stat" }, h("b", {}, balance), h("span", {}, "points to spend")),
-        h("div", { class: "stat" }, h("b", {}, streak), h("span", {}, "day streak")),
-        h("div", { class: "stat" }, h("b", {}, s.bestStreak), h("span", {}, "best streak")))),
-    h("section", { class: "card" },
-      h("h2", {}, "Your rewards"),
-      h("p", { class: "muted small" }, "Make a list of treats you'd like to earn and spend your points on them. Spending points doesn't lower your level."),
-      state.treats.map((tr) => h("div", { class: "item" },
-        h("div", { class: "txt" }, h("b", {}, tr.name), h("div", { class: "a" }, `${tr.cost} points`)),
-        h("div", { class: "row" },
-          h("button", { class: "primary small", disabled: balance < tr.cost, onclick: () => redeem(tr) }, "Redeem"),
-          h("button", { class: "ghost small danger", "aria-label": `Remove reward ${tr.name}`, onclick: () => { state.treats = state.treats.filter((x) => x.id !== tr.id); save(); render(); } }, "✕")))),
-      h("div", { class: "row", style: "margin-top:.8rem" },
-        h("input", { class: "grow", type: "text", maxlength: 60, placeholder: "New reward, e.g. Watch an episode", "aria-label": "Reward name", value: draft.treatName, oninput: (e) => { draft.treatName = e.target.value; } }),
-        h("input", { style: "max-width:8rem", type: "number", min: 1, placeholder: "Points", "aria-label": "Points cost", value: draft.treatCost, oninput: (e) => { draft.treatCost = e.target.value; } }),
-        h("button", { onclick: addTreat }, "Add")),
-      state.redeemed.length > 0 && h("div", { style: "margin-top:1rem" }, h("h3", {}, "Recently enjoyed"),
-        state.redeemed.slice(0, 5).map((r) => h("p", { class: "small muted", style: "margin:0" }, `${niceDate(r.date)} — ${r.name} (${r.cost} points)`)))),
-    h("section", { class: "card" },
-      h("h2", {}, "Badges"),
-      h("p", { class: "muted small" }, `${L.BADGES.filter((b) => s.badges[b.id]).length} of ${L.BADGES.length} unlocked`),
-      h("div", { class: "badges" }, L.BADGES.map((b) => {
-        const when = s.badges[b.id];
-        return h("div", { class: "badge" + (when ? "" : " locked") },
-          h("span", { class: "ico", "aria-hidden": "true" }, b.icon), h("b", {}, b.name),
-          h("span", { class: "small muted" }, when ? `Unlocked ${niceDate(when)}` : b.text));
-      }))),
-    h("section", { class: "card" },
-      h("h2", {}, "Daily goal"),
-      h("p", { class: "muted small" }, `Answer this many questions a day to earn ${L.GOAL_BONUS} bonus points.`),
-      h("label", {}, "Questions per day", goalInput)));
+  const badgeCard = h("section", { class: "card" },
+    h("h2", {}, "Badges"),
+    h("p", { class: "muted small" }, `${L.BADGES.filter((b) => s.badges[b.id]).length} of ${L.BADGES.length} unlocked`),
+    h("div", { class: "badges" }, L.BADGES.map((b) => {
+      const when = s.badges[b.id];
+      return h("div", { class: "badge" + (when ? "" : " locked") },
+        h("span", { class: "ico", "aria-hidden": "true" }, b.icon), h("b", {}, b.name),
+        h("span", { class: "small muted" }, when ? `Unlocked ${niceDate(when)}` : b.text));
+    })));
+
+  const goalInput = h("input", { type: "number", min: L.MIN_GOAL, max: 200, value: state.settings.dailyGoal, "aria-label": "Daily goal in questions",
+    onchange: (e) => {
+      const n = Math.round(Number(e.target.value));
+      state.settings.dailyGoal = Number.isFinite(n) ? Math.min(200, Math.max(L.MIN_GOAL, n)) : L.DEFAULT_GOAL;
+      save();
+      render();
+    } });
+  const goalCard = h("section", { class: "card" },
+    h("h2", {}, "Daily goal"),
+    h("p", { class: "muted small" }, `Answer this many questions a day to earn a chest (at least ${L.MIN_GOAL}). Weekly quests scale with it.`),
+    h("label", {}, "Questions per day", goalInput));
+
+  return h("div", {}, buddyCard, chestCard, questCard, shopCard, treatCard, badgeCard, goalCard);
 }
 
 // ======================= START =======================
-function init() {
-  state = load();
+async function init() {
   const fromHash = location.hash.slice(1);
   if (TAB_IDS.includes(fromHash)) tab = fromHash;
   window.addEventListener("hashchange", () => {
     const id = location.hash.slice(1);
-    if (TAB_IDS.includes(id) && id !== tab) { tab = id; render(); }
+    if (state && TAB_IDS.includes(id) && id !== tab) { tab = id; lastChest = null; render(); }
   });
+  window.addEventListener("online", () => { if (sync === "offline" || sync === "error") push(); });
+  if (document.addEventListener) document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") pullIfNewer(); });
+  if (!cloud.enabled) {
+    state = readLocal(LOCAL_KEY) || L.starterState(today());
+    booting = false;
+    applyLook();
+    render();
+    return;
+  }
   render();
+  const restored = await cloud.restore();
+  if (restored) await enterApp();
+  else { booting = false; render(); }
 }
 init();

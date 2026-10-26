@@ -4,7 +4,8 @@ export const BOX_DAYS = [0, 1, 3, 7, 14, 30]; // days until a question comes bac
 export const MAX_BOX = 5;
 export const MASTERED_BOX = 4; // a question in box 4 or 5 counts as "mastered"
 export const DEFAULT_GOAL = 10;
-export const GOAL_BONUS = 25;
+export const MIN_GOAL = 3;
+export const QUEST_REWARD = 40;
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -143,6 +144,9 @@ export const BADGES = [
   { id: "goal", icon: "✅", name: "Goal getter", text: "Reach your daily goal", test: (s) => s.stats.goalDays >= 1 },
   { id: "answered100", icon: "💯", name: "Century", text: "Answer 100 questions", test: (s) => s.stats.answered >= 100 },
   { id: "answered500", icon: "🏃", name: "Marathon", text: "Answer 500 questions", test: (s) => s.stats.answered >= 500 },
+  { id: "chest1", icon: "🎁", name: "Treasure hunter", text: "Open your first chest", test: (s) => s.stats.chestsOpened >= 1 },
+  { id: "quest1", icon: "📜", name: "Quest taker", text: "Complete a weekly quest", test: (s) => s.stats.questsDone >= 1 },
+  { id: "quest10", icon: "🗺️", name: "Adventurer", text: "Complete 10 weekly quests", test: (s) => s.stats.questsDone >= 10 },
   { id: "maker10", icon: "✍️", name: "Question maker", text: "Write 10 of your own questions", test: (s) => s.stats.created >= 10 },
   { id: "master", icon: "🧠", name: "Subject master", text: "Master every question in a subject (10 or more)", test: subjectMastered },
 ];
@@ -186,42 +190,256 @@ export function heatmap(stats, today, weeks, goal) {
   });
 }
 
-// ---------- adding lots of questions at once ----------
-/** One per line, "question | answer". A tab or "::" also works as the separator. */
-export function parseBulk(text) {
+// ---------- reading a pasted list of questions ----------
+const MAX_PASTE = 500;
+const clean = (v) => String(v ?? "").replace(/\*\*|__/g, "").replace(/\s+/g, " ").trim();
+const stripNumber = (line) => line.replace(/^\s*(?:\(?\d{1,3}[.):]|[-*•])\s+/, "");
+
+function splitCsv(line) {
+  const out = [];
+  let cur = "", quoted = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (quoted) {
+      if (ch === '"' && line[i + 1] === '"') { cur += '"'; i++; }
+      else if (ch === '"') quoted = false;
+      else cur += ch;
+    } else if (ch === '"') quoted = true;
+    else if (ch === ",") { out.push(cur); cur = ""; }
+    else cur += ch;
+  }
+  out.push(cur);
+  return out;
+}
+
+function toItem(parts) {
+  const cells = parts.map(clean);
+  const q = cells[0];
+  const a = cells[1];
+  if (!q || !a) return null;
+  const choices = [...new Set(cells.slice(2).filter(Boolean))].filter((c) => normalise(c) !== normalise(a)).slice(0, 5);
+  return { q: q.slice(0, 500), a: a.slice(0, 300), choices: choices.map((c) => c.slice(0, 200)) };
+}
+
+function fromJson(text) {
+  let data;
+  try { data = JSON.parse(text); } catch { return null; }
+  if (data && !Array.isArray(data)) data = data.questions || data.items || data.cards || null;
+  if (!Array.isArray(data)) return null;
   const items = [];
   let skipped = 0;
-  for (const raw of String(text ?? "").split(/\r?\n/)) {
-    const line = raw.trim();
-    if (!line) continue;
-    const sep = line.includes("|") ? "|" : line.includes("\t") ? "\t" : line.includes("::") ? "::" : null;
-    if (!sep) { skipped++; continue; }
-    const at = line.indexOf(sep);
-    const q = line.slice(0, at).trim();
-    const a = line.slice(at + sep.length).trim();
-    if (q && a) items.push({ q: q.slice(0, 500), a: a.slice(0, 300) }); else skipped++;
+  for (const row of data) {
+    let item = null;
+    if (Array.isArray(row)) item = toItem(row);
+    else if (row && typeof row === "object") {
+      const q = row.q ?? row.question ?? row.front ?? row.prompt;
+      const a = row.a ?? row.answer ?? row.back;
+      const wrong = row.wrong ?? row.choices ?? row.options ?? row.distractors ?? [];
+      item = toItem([q, a, ...(Array.isArray(wrong) ? wrong : [])]);
+    }
+    if (item) items.push(item); else skipped++;
   }
   return { items, skipped };
 }
 
+function fromBlocks(lines) {
+  const items = [];
+  let skipped = 0;
+  let cur = null;
+  let field = null;
+  const flush = () => { if (cur) { const it = toItem([cur.q, cur.a, ...cur.w]); if (it) items.push(it); else skipped++; } cur = null; field = null; };
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line) continue;
+    let m;
+    if ((m = line.match(/^(?:\*\*)?\s*(?:Q(?:uestion)?)\s*\d*\s*[.:)]\s*(?:\*\*)?\s*(.*)$/i))) { flush(); cur = { q: m[1], a: "", w: [] }; field = "q"; }
+    else if (cur && (m = line.match(/^(?:\*\*)?\s*(?:A(?:nswer)?)\s*\d*\s*[.:)]\s*(?:\*\*)?\s*(.*)$/i))) { cur.a = m[1]; field = "a"; }
+    else if (cur && (m = line.match(/^(?:\*\*)?\s*(?:Wrong(?:\s+options?|\s+answers?)?|Options?|Choices?|Distractors?)\s*[.:)]\s*(?:\*\*)?\s*(.*)$/i))) {
+      cur.w.push(...m[1].split(/\s*[|;]\s*/).filter(Boolean)); field = "w";
+    } else if (cur && field === "w") cur.w.push(stripNumber(line).replace(/^[A-E][.)]\s+/, ""));
+    else if (cur && field) cur[field] += " " + line;
+    else skipped++;
+  }
+  flush();
+  return { items, skipped };
+}
+
+/**
+ * Reads a pasted list of questions from almost any layout:
+ *   question | answer | wrong 1 | wrong 2     (the format the prompt asks other AIs for)
+ *   tab-separated rows from a spreadsheet, "question, answer" CSV, markdown tables,
+ *   "question :: answer", "question — answer", Q:/A: blocks, or a JSON list.
+ * Never throws; returns { items: [{q, a, choices}], skipped, format }.
+ */
+export function parseQuestionList(text) {
+  const src = String(text ?? "").replace(/^```[a-z]*\s*$/gim, "").trim();
+  if (!src) return { items: [], skipped: 0, format: "empty" };
+
+  if (/^[\[{]/.test(src)) {
+    const j = fromJson(src);
+    if (j) return { ...j, items: j.items.slice(0, MAX_PASTE), format: "json" };
+  }
+  const lines = src.split(/\r?\n/);
+  const hasQ = lines.some((l) => /^\s*(?:\*\*)?\s*Q(?:uestion)?\s*\d*\s*[.:)]/i.test(l));
+  const hasA = lines.some((l) => /^\s*(?:\*\*)?\s*A(?:nswer)?\s*\d*\s*[.:)]/i.test(l));
+  if (hasQ && hasA) { const b = fromBlocks(lines); return { ...b, items: b.items.slice(0, MAX_PASTE), format: "blocks" }; }
+
+  const items = [];
+  let skipped = 0;
+  for (const raw of lines) {
+    let line = raw.trim();
+    if (!line) continue;
+    if (/^[|\s:-]+$/.test(line)) continue; // table divider like |---|---|
+    let parts = null;
+    if (line.startsWith("|")) {
+      parts = line.replace(/^\||\|$/g, "").split("|");
+      if (items.length === 0 && /^\s*(question|q|front|prompt)\s*$/i.test(parts[0])) continue; // table header row
+    } else {
+      line = stripNumber(line);
+      if (line.includes("|")) parts = line.split("|");
+      else if (line.includes("\t")) parts = line.split("\t");
+      else if (line.includes("::")) parts = line.split("::");
+      else if (/\s[—–]\s/.test(line)) parts = line.split(/\s[—–]\s/);
+      else if (/^\s*[^,]+,\s*[^,]+/.test(line) && line.includes(",") && !/\?\s*$/.test(line)) parts = splitCsv(line);
+      else if (/\?\s+\S/.test(line)) { const at = line.indexOf("?") + 1; parts = [line.slice(0, at), line.slice(at)]; }
+    }
+    const item = parts ? toItem(parts) : null;
+    if (item) items.push(item); else skipped++;
+  }
+  return { items: items.slice(0, MAX_PASTE), skipped: skipped + Math.max(0, items.length - MAX_PASTE), format: "lines" };
+}
+
+/** Marks which items are already in the app (same question text in the same subject). */
+export function markDuplicates(items, questions, subjectId) {
+  const seen = new Set(questions.filter((q) => q.subjectId === subjectId).map((q) => normalise(q.q)));
+  return items.map((it) => {
+    const key = normalise(it.q);
+    const duplicate = seen.has(key);
+    seen.add(key);
+    return { ...it, duplicate };
+  });
+}
+
+export const LEVELS = ["Primary school", "Years 7–9 (KS3)", "GCSE", "A-level", "University", "Just for fun"];
+export const STYLES = { typed: "typed answers", choice: "multiple choice", mixed: "a mix of typed and multiple choice" };
+
+/** The text people copy into another AI (ChatGPT, Gemini…) to get questions this app can read. */
+export function buildAiPrompt({ topic, level = "GCSE", count = 15, style = "mixed" } = {}) {
+  const t = clean(topic).slice(0, 120) || "[type your topic here]";
+  const n = Math.max(1, Math.min(50, Math.round(Number(count)) || 15));
+  const styleLine = {
+    typed: "Do not include wrong options — every question is answered by typing.",
+    choice: "Give 3 wrong options for every question (so each one is multiple choice).",
+    mixed: "Give 3 wrong options for about half the questions and none for the rest.",
+  }[style] || "";
+  return `Write ${n} revision questions about "${t}" at ${clean(level) || "GCSE"} level.
+
+Reply with ONLY the questions, one per line, in exactly this format:
+question | answer | wrong option 1 | wrong option 2 | wrong option 3
+
+Rules:
+- ${styleLine}
+- One line per question. No numbering, headings, bullet points, bold text or intro/outro text.
+- Keep every answer short (1–6 words) so it can be typed, and make sure it is factually correct.
+- Don't use the "|" character inside a question or answer.
+- Cover a range of subtopics and don't repeat questions.`;
+}
+
+// ---------- chests (a surprise reward for reaching your daily goal) ----------
+export const CHEST_TABLE = [[20, 45], [35, 30], [50, 15], [80, 7], [150, 3]]; // [points, weight]
+export function chestReward(rand = Math.random) {
+  let roll = rand() * CHEST_TABLE.reduce((n, [, w]) => n + w, 0);
+  for (const [points, weight] of CHEST_TABLE) { if ((roll -= weight) < 0) return points; }
+  return CHEST_TABLE[0][0];
+}
+export function openChest(state, rand = Math.random) {
+  if (state.chests < 1) return null;
+  const points = chestReward(rand);
+  state.chests--;
+  state.stats.points += points;
+  state.stats.chestsOpened++;
+  return points;
+}
+
+// ---------- weekly quests ----------
+export const weekStart = (date) => addDays(date, -weekday(date));
+
+export function weeklyQuests(state, today) {
+  const ws = weekStart(today);
+  const goal = state.settings.dailyGoal;
+  let answered = 0, correct = 0, days = 0;
+  for (let i = 0; i < 7; i++) {
+    const d = state.stats.days[addDays(ws, i)];
+    if (d && d.n > 0) { answered += d.n; correct += d.c; days++; }
+  }
+  const defs = [
+    { id: "answers", text: `Answer ${goal * 5} questions`, progress: answered, target: goal * 5 },
+    { id: "days", text: "Revise on 4 different days", progress: days, target: 4 },
+    { id: "correct", text: `Get ${goal * 3} answers right`, progress: correct, target: goal * 3 },
+  ];
+  return defs.map((q) => ({ ...q, reward: QUEST_REWARD, done: q.progress >= q.target, claimed: Boolean(state.claims[`${ws}:${q.id}`]) }));
+}
+/** Claims a finished quest. Claiming all three also earns a chest. */
+export function claimQuest(state, id, today) {
+  const quest = weeklyQuests(state, today).find((q) => q.id === id);
+  if (!quest || !quest.done || quest.claimed) return { ok: false };
+  const ws = weekStart(today);
+  state.claims[`${ws}:${id}`] = true;
+  state.stats.points += quest.reward;
+  state.stats.questsDone++;
+  const sweep = weeklyQuests(state, today).every((q) => q.claimed);
+  if (sweep && !state.claims[`${ws}:bonus`]) { state.claims[`${ws}:bonus`] = true; state.chests++; }
+  return { ok: true, points: quest.reward, chest: sweep };
+}
+
+// ---------- your study buddy ----------
+export const BUDDY_STAGES = [
+  [1, "🥚", "Egg"], [2, "🐣", "Hatchling"], [3, "🐥", "Chick"], [5, "🐦", "Fledgling"],
+  [8, "🦜", "Parrot"], [12, "🦅", "Eagle"], [18, "🐉", "Dragon"],
+];
+export function buddyFor(level) {
+  let stage = BUDDY_STAGES[0];
+  for (const s of BUDDY_STAGES) if (level >= s[0]) stage = s;
+  const next = BUDDY_STAGES.find((s) => s[0] > level);
+  return { emoji: stage[1], title: stage[2], nextLevel: next ? next[0] : null };
+}
+export function buddyMood(state, today) {
+  const d = state.stats.days[today];
+  const n = d ? d.n : 0;
+  const streak = currentStreak(state.stats, today);
+  if (n >= state.settings.dailyGoal) return "is thrilled — daily goal smashed!";
+  if (n > 0) return `is happy — ${state.settings.dailyGoal - n} more to hit today's goal.`;
+  if (streak > 0) return `is waiting — answer a question to keep your ${streak}-day streak alive.`;
+  return "is sleepy — wake them up with a question.";
+}
+
 // ---------- saved data ----------
-export const defaultTreats = () => [
-  { id: "t1", name: "30 minutes of free time", cost: 100 },
-  { id: "t2", name: "A favourite snack", cost: 150 },
-  { id: "t3", name: "An evening off", cost: 500 },
+export const TREAT_IDEAS = [
+  { name: "Watch an episode", cost: 80 },
+  { name: "Lie-in on a weekend", cost: 150 },
+  { name: "Game time — 1 hour", cost: 200 },
+  { name: "A favourite snack", cost: 150 },
+  { name: "Takeaway night", cost: 400 },
+  { name: "Day out with friends", cost: 800 },
 ];
 
 export function emptyState() {
   return {
-    v: 1,
+    v: 2,
+    savedAt: "",
     subjects: [],
     questions: [],
-    treats: defaultTreats(),
+    treats: [],
     redeemed: [],
     settings: { dailyGoal: DEFAULT_GOAL },
+    buddy: { name: "Pip" },
+    chests: 0,
+    owned: [],
+    equipped: { palette: "", font: "", hat: "" },
+    claims: {},
     stats: {
       points: 0, spent: 0, answered: 0, correct: 0, streak: 0, bestStreak: 0, lastDay: "",
-      perfectRounds: 0, goalDays: 0, created: 0, days: {}, badges: {},
+      perfectRounds: 0, goalDays: 0, created: 0, chestsOpened: 0, questsDone: 0, days: {}, badges: {},
     },
   };
 }
@@ -229,10 +447,11 @@ export function emptyState() {
 const str = (v, max) => (typeof v === "string" ? v.trim().slice(0, max) : "");
 const num = (v, min, max, fallback) => (Number.isFinite(v) ? Math.min(max, Math.max(min, v)) : fallback);
 
-/** Turns anything loaded from storage or an imported file into safe, well-formed data. */
-export function sanitiseState(raw) {
+/** Turns anything loaded from storage, the cloud or an imported file into safe, well-formed data. */
+export function sanitiseState(raw, catalogueIds = null) {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("That file isn't a revision backup.");
   const out = emptyState();
+  out.savedAt = typeof raw.savedAt === "string" && !Number.isNaN(Date.parse(raw.savedAt)) ? raw.savedAt : "";
 
   const subjectIds = new Set();
   for (const s of (Array.isArray(raw.subjects) ? raw.subjects : []).slice(0, 100)) {
@@ -263,7 +482,6 @@ export function sanitiseState(raw) {
   }
 
   if (Array.isArray(raw.treats)) {
-    out.treats = [];
     for (const t of raw.treats.slice(0, 30)) {
       const id = str(t && t.id, 40);
       const name = str(t && t.name, 60);
@@ -276,10 +494,24 @@ export function sanitiseState(raw) {
       if (name) out.redeemed.push({ name, cost: Math.round(num(r.cost, 0, 100000, 0)), date: typeof r.date === "string" && DATE_RE.test(r.date) ? r.date : "" });
     }
   }
-  out.settings.dailyGoal = Math.round(num(raw.settings && raw.settings.dailyGoal, 1, 200, DEFAULT_GOAL));
+  out.settings.dailyGoal = Math.round(num(raw.settings && raw.settings.dailyGoal, MIN_GOAL, 200, DEFAULT_GOAL));
+  out.buddy.name = str(raw.buddy && raw.buddy.name, 20) || "Pip";
+  out.chests = Math.round(num(raw.chests, 0, 1000, 0));
+  const known = (id) => !catalogueIds || catalogueIds.has(id);
+  if (Array.isArray(raw.owned)) out.owned = [...new Set(raw.owned.map((x) => str(x, 60)).filter((x) => x && known(x)))].slice(0, 200);
+  const eq = raw.equipped && typeof raw.equipped === "object" ? raw.equipped : {};
+  for (const kind of ["palette", "font", "hat"]) {
+    const id = str(eq[kind], 60);
+    out.equipped[kind] = id.startsWith(kind + ":") && known(id) ? id : "";
+  }
+  if (raw.claims && typeof raw.claims === "object") {
+    for (const k of Object.keys(raw.claims).filter((k) => /^\d{4}-\d{2}-\d{2}:(answers|days|correct|bonus)$/.test(k)).sort().slice(-60)) {
+      if (raw.claims[k] === true) out.claims[k] = true;
+    }
+  }
 
   const st = raw.stats && typeof raw.stats === "object" ? raw.stats : {};
-  for (const k of ["points", "spent", "answered", "correct", "streak", "bestStreak", "perfectRounds", "goalDays", "created"]) {
+  for (const k of ["points", "spent", "answered", "correct", "streak", "bestStreak", "perfectRounds", "goalDays", "created", "chestsOpened", "questsDone"]) {
     out.stats[k] = Math.round(num(st[k], 0, 1e9, 0));
   }
   out.stats.lastDay = typeof st.lastDay === "string" && DATE_RE.test(st.lastDay) ? st.lastDay : "";
@@ -287,7 +519,7 @@ export function sanitiseState(raw) {
     const keys = Object.keys(st.days).filter((k) => DATE_RE.test(k)).sort().slice(-200);
     for (const k of keys) {
       const d = st.days[k];
-      if (d && typeof d === "object") out.stats.days[k] = { n: Math.round(num(d.n, 0, 1e6, 0)), c: Math.round(num(d.c, 0, 1e6, 0)), p: Math.round(num(d.p, 0, 1e7, 0)) };
+      if (d && typeof d === "object") out.stats.days[k] = { n: Math.round(num(d.n, 0, 1e6, 0)), c: Math.round(num(d.c, 0, 1e6, 0)), p: Math.round(num(d.p, 0, 1e7, 0)), ...(d.g === true ? { g: true } : {}) }; // g = today's goal chest already given
     }
   }
   if (st.badges && typeof st.badges === "object") {
