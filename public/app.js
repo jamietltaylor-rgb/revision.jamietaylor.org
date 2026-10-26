@@ -4,7 +4,7 @@ import { CONFIG } from "./config.js";
 import { createCloud, displayName } from "./cloud.js";
 
 const LOCAL_KEY = "revise-app-v1"; // used when logins aren't switched on, and for progress made before accounts existed
-const TABS = [["home", "🏠", "Home"], ["revise", "📝", "Revise"], ["questions", "✏️", "Questions"], ["rewards", "🏆", "Rewards"]];
+const TABS = [["home", "🏠", "Home"], ["revise", "📝", "Revise"], ["questions", "✏️", "Questions"], ["rewards", "🏆", "Rewards"], ["farm", "🌾", "Farm"]];
 const TAB_IDS = TABS.map((t) => t[0]);
 const CATALOGUE = new Set(Shop.ITEMS.map((i) => i.id));
 
@@ -25,7 +25,7 @@ const auth = { mode: "in", username: "", password: "", confirm: "", error: "", b
 const draft = {
   subjectId: "", newSubject: "", q: "", a: "", wrong: "",
   topic: "", level: "GCSE", count: "10", style: "mixed", busy: false, aiError: "", prompt: "",
-  paste: "", preview: null, filter: "all", search: "", treatName: "", treatCost: "",
+  pet: "buddy", paste: "", preview: null, filter: "all", search: "", treatName: "", treatCost: "",
 };
 
 function safeStorage() {
@@ -276,7 +276,7 @@ function render() {
   let view;
   if (booting) view = h("p", { class: "muted" }, "Loading…");
   else if (!state) view = viewAuth();
-  else view = { home: viewHome, revise: viewRevise, questions: viewQuestions, rewards: viewRewards }[tab]();
+  else view = { home: viewHome, revise: viewRevise, questions: viewQuestions, rewards: viewRewards, farm: viewFarm }[tab]();
   app.replaceChildren(...[
     inApp && !storageOk && h("div", { class: "banner", role: "alert" }, "This browser isn't letting the app save on this device. " + (cloud.signedIn ? "Your account copy is still saved." : "Your progress will be lost when you close the page — try turning off private browsing.")),
     view,
@@ -498,10 +498,17 @@ function commit(correct) {
   const t = today();
   const s = state.stats;
   if (!item.retry) {
+    const subject = state.subjects.find((x) => x.id === q.subjectId);
+    const stageBefore = subject ? L.petFor(state, subject, t).stage : 0;
     const next = L.schedule(q, correct, t);
     q.box = next.box;
     q.due = next.due;
     if (correct) q.right++; else q.wrong++;
+    if (correct && subject) {
+      subject.xp = (subject.xp || 0) + 1;
+      const pet = L.petFor(state, subject, t);
+      if (pet.stage > stageBefore) toast(`🌟 ${pet.name} grew into a ${pet.title.toLowerCase()} ${pet.emoji}`);
+    }
     s.answered++;
     if (correct) s.correct++;
     Object.assign(s, L.updateStreak(s, t));
@@ -953,6 +960,92 @@ function viewRewards() {
   return h("div", {}, buddyCard, chestCard, questCard, shopCard, treatCard, badgeCard, goalCard);
 }
 
+
+// ======================= FARM =======================
+const PARADE_MESSAGES = [
+  "🎉 Your pets are throwing a party for all your hard work!",
+  "🐾 The whole farm is cheering for you!",
+  "🌟 Your pets say: you've got this!",
+  "🎺 Pet parade! Keep revising and they'll keep growing.",
+];
+function parade() {
+  if (!state) return toast("Sign in to meet your pets! 🐣");
+  const t = today();
+  const lvl = L.levelFor(state.stats.points);
+  const emojis = [L.buddyFor(lvl.level).emoji, ...L.farmPets(state, t).map((p) => p.emoji)];
+  const bonus = L.findSecret(state, t);
+  checkBadges();
+  save();
+  const message = PARADE_MESSAGES[Math.floor(Math.random() * PARADE_MESSAGES.length)];
+  toast(bonus ? `${message}  +${bonus} secret points 🔍` : message);
+  const calm = typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if (!calm) {
+    const runners = Array.from({ length: Math.min(24, Math.max(8, emojis.length * 3)) }, (_, i) =>
+      h("span", { class: "runner", style: `--y:${(8 + Math.random() * 78).toFixed(1)}%;--d:${(Math.random() * 2.5).toFixed(2)}s;--s:${(1.8 + Math.random() * 1.8).toFixed(2)}rem` }, emojis[i % emojis.length]));
+    const layer = h("div", { class: "parade", "aria-hidden": "true" }, runners);
+    document.body.append(layer);
+    setTimeout(() => layer.remove(), 9000);
+  }
+  render();
+}
+
+function feed(subjectId) {
+  go("revise");
+  startSession(subjectId, "10");
+}
+
+function viewFarm() {
+  const t = today();
+  const lvl = L.levelFor(state.stats.points);
+  const buddy = L.buddyFor(lvl.level);
+  const pets = L.farmPets(state, t);
+  if (draft.pet !== "buddy" && !pets.some((p) => p.subjectId === draft.pet)) draft.pet = "buddy";
+  const hat = Shop.itemById(state.equipped.hat);
+
+  const card = (key, emoji, name, title, due, i, wearing) =>
+    h("button", { class: "pet-card" + (draft.pet === key ? " on" : ""), "aria-pressed": draft.pet === key, "aria-label": `${name}, ${title}${due ? `, ${due} due` : ""}`, onclick: () => { draft.pet = key; render(); } },
+      h("span", { class: "pet-emoji", "aria-hidden": "true", style: `animation-delay:${(i * 0.37).toFixed(2)}s` }, wearing && h("span", { class: "hat" }, wearing), emoji),
+      h("span", { class: "pet-name" }, name),
+      h("span", { class: "small muted" }, title),
+      due > 0 && h("span", { class: "tag" }, `${due} due`));
+
+  const field = h("div", { class: "farm" },
+    h("div", { class: "farm-grid" },
+      card("buddy", buddy.emoji, state.buddy.name, `${buddy.title} · companion`, 0, 0, hat && hat.emoji),
+      pets.map((p, i) => card(p.subjectId, p.emoji, p.name, `${p.title} · ${p.subjectName}`, p.due, i + 1, null))));
+
+  let detail;
+  if (draft.pet === "buddy") {
+    detail = h("section", { class: "card" },
+      h("h2", {}, `${state.buddy.name} the ${buddy.title}`),
+      h("p", { class: "muted" }, `Your companion grows as you level up (level ${lvl.level}).${buddy.nextLevel ? ` Evolves at level ${buddy.nextLevel}.` : " Fully grown!"} Hats are in the Rewards shop.`),
+      bar(lvl.pct, "Progress to next level"),
+      h("label", { style: "margin-top:1rem" }, "Name", h("input", { type: "text", maxlength: 20, value: state.buddy.name, "aria-label": "Pet name",
+        onchange: (e) => { state.buddy.name = e.target.value.trim().slice(0, 20) || "Pip"; save(); render(); } })));
+  } else {
+    const p = pets.find((x) => x.subjectId === draft.pet);
+    const subject = state.subjects.find((x) => x.id === p.subjectId);
+    detail = h("section", { class: "card" },
+      h("h2", {}, `${p.name} the ${p.title}`),
+      h("p", { class: "muted" }, `${p.subjectName} · ${plural(p.xp, "right answer")} so far. ${p.due ? `${p.name} is hungry — ${plural(p.due, "question")} due!` : `${p.name} is happy and well fed.`}`),
+      bar(p.progress, `${p.name}'s growth`),
+      h("p", { class: "small muted", style: "margin:.4rem 0 1rem" }, p.nextAt === null ? "Fully grown! 🌟" : `${p.nextAt - p.xp} more right ${p.nextAt - p.xp === 1 ? "answer" : "answers"} to become a ${L.PET_STAGE_TITLES[p.stage + 1].toLowerCase()}.`),
+      h("label", {}, "Name", h("input", { type: "text", maxlength: 20, placeholder: "Give your pet a name", value: p.name, "aria-label": "Pet name",
+        onchange: (e) => { const v = e.target.value.trim().slice(0, 20); if (v) subject.petName = v; else delete subject.petName; save(); render(); } })),
+      h("button", { class: "primary", disabled: p.total === 0, onclick: () => feed(p.subjectId) }, `🍽️ Feed ${p.name} — revise ${p.subjectName}`));
+  }
+
+  return h("div", {},
+    h("section", { class: "card" },
+      h("h1", {}, "🌾 Your farm"),
+      h("p", { class: "muted", style: "margin:0" }, pets.length
+        ? `${plural(pets.length + 1, "animal")} live here. Every subject has its own pet — answer its questions right and it grows.`
+        : "Every subject you revise hatches its own pet. Add some questions and your first egg will appear!")),
+    field,
+    pets.length === 0 && h("div", { class: "row", style: "margin-bottom:1rem" }, h("button", { class: "primary", onclick: () => go("questions") }, "Add questions")),
+    detail);
+}
+
 // ======================= START =======================
 async function init() {
   const fromHash = location.hash.slice(1);
@@ -963,6 +1056,14 @@ async function init() {
   });
   window.addEventListener("online", () => { if (sync === "offline" || sync === "error") push(); });
   if (document.addEventListener) document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") pullIfNewer(); });
+  const brand = document.getElementById("brand");
+  if (brand) {
+    let timer = null, held = false;
+    brand.addEventListener("pointerdown", () => { held = false; clearTimeout(timer); timer = setTimeout(() => { held = true; parade(); }, 800); });
+    for (const type of ["pointerup", "pointerleave", "pointercancel"]) brand.addEventListener(type, () => clearTimeout(timer));
+    brand.addEventListener("click", (e) => { if (held) { e.preventDefault(); held = false; } });
+    brand.addEventListener("contextmenu", (e) => e.preventDefault());
+  }
   if (!cloud.enabled) {
     state = readLocal(LOCAL_KEY) || L.starterState(today());
     booting = false;

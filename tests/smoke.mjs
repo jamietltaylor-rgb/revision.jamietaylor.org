@@ -30,10 +30,12 @@ const fire = (el, type, extra = {}) => { for (const f of el.listeners[type] ?? [
 const all = (root, pred, out = []) => { if (root.nodeType === 1) { if (pred(root)) out.push(root); root.children.forEach((c) => all(c, pred, out)); } return out; };
 
 function makeWorld({ config, fetchFn, label }) {
-  const world = { label, timers: [], windowListeners: {}, docListeners: {} };
+  const world = { label, timers: new Map(), windowListeners: {}, docListeners: {} };
+  let timerId = 0;
   world.reset = () => {
     world.app = new El("main"); world.nav = new El("nav"); world.user = new El("div"); world.toasts = new El("div");
-    world.html = new El("html"); world.head = new El("head");
+    world.html = new El("html"); world.head = new El("head"); world.body = new El("body"); world.brand = new El("a"); world.brand.id = "brand";
+    world.bodyLog = []; { const plainBody = world.body.append.bind(world.body); world.body.append = (...k) => { k.forEach((x) => world.bodyLog.push(x.className)); plainBody(...k); }; }
     world.toastLog = [];
     const log = world.toastLog, plain = world.toasts.append.bind(world.toasts);
     world.toasts.append = (...k) => { k.forEach((x) => log.push(x.textContent)); plain(...k); };
@@ -44,16 +46,16 @@ function makeWorld({ config, fetchFn, label }) {
   world.localStorage = { getItem: (k) => store.get(k) ?? null, setItem: (k, v) => store.set(k, String(v)), removeItem: (k) => store.delete(k) };
   world.install = () => {
     globalThis.document = {
-      createElement: (t) => new El(t), createTextNode: (s) => new Text_(s), body: new El("body"), head: world.head, documentElement: world.html,
+      createElement: (t) => new El(t), createTextNode: (s) => new Text_(s), body: world.body, head: world.head, documentElement: world.html,
       visibilityState: "visible", addEventListener: (t, f) => { (world.docListeners[t] ??= []).push(f); },
-      getElementById: (id) => ({ app: world.app, nav: world.nav, user: world.user, toasts: world.toasts }[id] ?? all(world.head, (e) => e.id === id)[0] ?? all(world.user, (e) => e.id === id)[0] ?? null),
+      getElementById: (id) => ({ app: world.app, nav: world.nav, user: world.user, toasts: world.toasts, brand: world.brand }[id] ?? all(world.head, (e) => e.id === id)[0] ?? all(world.user, (e) => e.id === id)[0] ?? null),
     };
     globalThis.window = { addEventListener: (t, f) => { (world.windowListeners[t] ??= []).push(f); }, scrollTo() {} };
     globalThis.location = { hash: "" };
     globalThis.localStorage = world.localStorage;
     globalThis.confirm = () => true;
-    globalThis.setTimeout = (fn, ms) => { world.timers.push(fn); return world.timers.length; };
-    globalThis.clearTimeout = () => {};
+    globalThis.setTimeout = (fn) => { world.timers.set(++timerId, fn); return timerId; };
+    globalThis.clearTimeout = (id) => { world.timers.delete(id); };
     globalThis.fetch = fetchFn;
     URL.createObjectURL = () => "blob:x"; URL.revokeObjectURL = () => {};
   };
@@ -69,7 +71,7 @@ function makeWorld({ config, fetchFn, label }) {
   w.byLabel = (aria) => w.input((e) => e.attrs["aria-label"] === aria);
   w.byPlaceholder = (ph) => w.input((e) => e.attrs.placeholder === ph);
   w.tab = (i) => { fire(w.nav.children[i], "click"); };
-  w.flush = async () => { for (let i = 0; i < 12; i++) { const t = w.timers.splice(0); t.forEach((f) => f()); await new Promise((r) => setImmediate(r)); } };
+  w.flush = async () => { for (let i = 0; i < 12; i++) { const t = [...w.timers.values()]; w.timers.clear(); t.forEach((f) => f()); await new Promise((r) => setImmediate(r)); } };
   w.start = () => { all(w.app, (e) => e.tagName === "SELECT").forEach((sel) => { sel.value = sel.attrs.id === "length" ? "10" : "all"; }); w.btn("Start").click(); };
   w.shopItem = (name) => all(w.app, (e) => e.className === "shop-item" && e.children[0].textContent.includes(name))[0];
   return world;
@@ -81,7 +83,7 @@ const dirCopy = (config) => {
   return pathToFileURL(path.join(dir, "public", "app.js")).href;
 };
 let runNo = 0;
-const boot = async (world, url) => { world.reset(); world.install(); world.timers.length = 0; await import(`${url}?run=${++runNo}`); await world.flush(); };
+const boot = async (world, url) => { world.reset(); world.install(); world.timers.clear(); await import(`${url}?run=${++runNo}`); await world.flush(); };
 
 const ANSWERS = { "What is the capital of France?": "Paris", "Which is the longest river in the UK?": "River Severn", "What is the largest ocean on Earth?": "Pacific", "How many continents are there?": "seven", "What is the capital of Australia?": "Canberra" };
 async function playRound(w, { wrongFirst = false } = {}) {
@@ -104,7 +106,7 @@ async function playRound(w, { wrongFirst = false } = {}) {
 {
   const w = makeWorld({ label: "local", fetchFn: async () => { throw new Error("no network expected"); } });
   await boot(w, dirCopy(null));
-  w.say("Ready to revise?"); w.say("Pip the Egg"); assert.equal(w.nav.children.length, 4); assert.equal(w.user.children.length, 0, "no account bar without logins");
+  w.say("Ready to revise?"); w.say("Pip the Egg"); assert.equal(w.nav.children.length, 5); assert.equal(w.user.children.length, 0, "no account bar without logins");
   await playRound(w, { wrongFirst: true });
   let saved = JSON.parse(w.store.get("revise-app-v1"));
   assert.equal(saved.v, 2); assert.equal(saved.stats.answered, 5); assert.ok(saved.stats.points >= 40);
@@ -122,6 +124,7 @@ async function playRound(w, { wrongFirst = false } = {}) {
   saved = JSON.parse(w.store.get("revise-app-v1")); assert.equal(saved.questions.length, 7);
   assert.deepEqual(saved.questions.find((q) => q.a === "Rome").choices, ["Milan", "Turin"]);
   // rewards screen
+  w.tab(4); w.say("Your farm"); w.say("2 animals live here"); w.say("Example: Geography");
   w.tab(3); w.say("Weekly quests"); w.say("Chests"); w.say("Shop"); w.say("Real-life rewards"); w.say("Watch an episode (80)");
   w.btn("＋ Watch an episode (80)").click(); w.say("80 points");
   fire(w.nav.children[3], "click");
@@ -158,7 +161,7 @@ async function playRound(w, { wrongFirst = false } = {}) {
   w.btn("Create account", 1).click(); await w.flush(); w.say("at least 6 characters");
   w.typeInto(pw()[0], "secret1"); w.typeInto(pw()[1], "secret1");
   w.btn("Create account", 1).click(); await w.flush();
-  w.say("Ready to revise?"); assert.equal(w.nav.children.length, 4); assert.ok(w.user.textContent.includes("jamie_t"), "shows the username, not the fake email");
+  w.say("Ready to revise?"); assert.equal(w.nav.children.length, 5); assert.ok(w.user.textContent.includes("jamie_t"), "shows the username, not the fake email");
   assert.equal(fake.rows.size, 1, "first save reached the cloud"); assert.ok(w.user.textContent.includes("Saved"));
   const userId = [...fake.users.values()][0].id;
 
@@ -223,8 +226,31 @@ async function playRound(w, { wrongFirst = false } = {}) {
   w.say("Ready to revise?"); w.tab(2); w.say(`Your questions (${fake.rows.get(userId).data.questions.length})`);
   assert.equal(JSON.parse(w.store.get(`revise-app-v2-${userId}`)).stats.points, fake.rows.get(userId).data.stats.points);
 
+
+  // the farm: every subject has a pet you can name and feed
+  w.tab(4); w.say("Your farm"); w.say("3 animals live here");
+  const cards = () => all(w.app, (e) => e.tagName === "BUTTON" && e.className.includes("pet-card"));
+  assert.equal(cards().length, 3); cards()[1].click(); w.say("is hungry"); // the example subject has due questions
+  const nm = w.byLabel("Pet name"); nm.value = "Rex"; fire(nm, "change"); await w.flush();
+  assert.equal(fake.rows.get(userId).data.subjects[0].petName, "Rex"); w.say("Rex the");
+  const grown = fake.rows.get(userId).data.subjects[0];
+  assert.ok((grown.xp || 0) >= 4, "right answers fed the pet");
+  const feedBtn = all(w.app, (e) => e.tagName === "BUTTON" && e.textContent.includes("Feed Rex"))[0]; assert.ok(feedBtn); feedBtn.click(); w.say("Question 1 of");
+  w.tab(4); cards()[0].click(); w.say("Your companion grows as you level up");
+
+  // hold the word "Revise": a surprise, with a once-a-day bonus
+  const pts = () => fake.rows.get(userId).data.stats.points;
+  const p0 = pts(); let prevented = false;
+  fire(w.brand, "pointerdown"); await w.flush();
+  assert.equal(pts(), p0 + 10, "first find gives 10 points"); assert.equal(fake.rows.get(userId).data.stats.secrets, 1); assert.ok(fake.rows.get(userId).data.stats.badges.secret);
+  assert.ok(w.bodyLog.includes("parade"), "the parade was drawn"); assert.ok(w.toastLog.join("|").includes("+10 secret points"));
+  fire(w.brand, "click", { preventDefault() { prevented = true; } }); assert.ok(prevented, "letting go after a hold doesn't navigate");
+  prevented = false; fire(w.brand, "click", { preventDefault() { prevented = true; } }); assert.ok(!prevented, "a normal tap still works");
+  fire(w.brand, "pointerdown"); fire(w.brand, "pointerup"); await w.flush(); assert.equal(fake.rows.get(userId).data.stats.secrets, 1, "a short press does nothing");
+  fire(w.brand, "pointerdown"); await w.flush(); assert.equal(fake.rows.get(userId).data.stats.secrets, 2); assert.equal(pts(), p0 + 10, "bonus is once a day");
+
   // a revoked session drops you back to the sign-in page without crashing
-  fake.revokeAll(); fake.expireAll();
+  fake.revokeAll(); fake.expireAll(); w.tab(2);
   w.typeInto(w.input((e) => e.attrs.id === "new-q"), "Another?"); w.typeInto(w.byPlaceholder("Mitochondria"), "Yes"); w.btn("Add question").click(); await w.flush();
   w.say("Your session ended"); assert.equal(w.nav.children.length, 0);
   console.log("B: accounts ok");

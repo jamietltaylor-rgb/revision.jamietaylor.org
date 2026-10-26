@@ -144,6 +144,7 @@ export const BADGES = [
   { id: "goal", icon: "✅", name: "Goal getter", text: "Reach your daily goal", test: (s) => s.stats.goalDays >= 1 },
   { id: "answered100", icon: "💯", name: "Century", text: "Answer 100 questions", test: (s) => s.stats.answered >= 100 },
   { id: "answered500", icon: "🏃", name: "Marathon", text: "Answer 500 questions", test: (s) => s.stats.answered >= 500 },
+  { id: "secret", icon: "🔍", name: "Secret finder", text: "Find the hidden surprise", test: (s) => s.stats.secrets >= 1 },
   { id: "chest1", icon: "🎁", name: "Treasure hunter", text: "Open your first chest", test: (s) => s.stats.chestsOpened >= 1 },
   { id: "quest1", icon: "📜", name: "Quest taker", text: "Complete a weekly quest", test: (s) => s.stats.questsDone >= 1 },
   { id: "quest10", icon: "🗺️", name: "Adventurer", text: "Complete 10 weekly quests", test: (s) => s.stats.questsDone >= 10 },
@@ -392,6 +393,50 @@ export function claimQuest(state, id, today) {
   return { ok: true, points: quest.reward, chest: sweep };
 }
 
+// ---------- the farm: every subject you revise gets its own pet ----------
+export const PET_LINES = [
+  ["🥚", "🐣", "🐥", "🐔", "🦚"],
+  ["🥚", "🐱", "🐈", "🐯", "🦁"],
+  ["🥚", "🦎", "🐊", "🐲", "🐉"],
+  ["🥚", "🐟", "🐠", "🐬", "🐳"],
+  ["🥚", "🐭", "🐹", "🐰", "🦄"],
+  ["🥚", "🐛", "🐝", "🦋", "🦜"],
+];
+export const PET_STAGE_TITLES = ["Egg", "Baby", "Young", "Grown", "Legend"];
+export const PET_STAGE_AT = [0, 5, 20, 50, 100]; // right answers needed in that subject
+export const PET_NAMES = ["Pip", "Maple", "Biscuit", "Clover", "Pebble", "Nugget", "Juniper", "Waffles", "Sprout", "Mochi", "Olive", "Ziggy", "Pudding", "Basil", "Poppy", "Tango"];
+function hashStr(text) {
+  let hash = 2166136261;
+  for (let i = 0; i < text.length; i++) { hash ^= text.charCodeAt(i); hash = Math.imul(hash, 16777619); }
+  return hash >>> 0;
+}
+export function petFor(state, subject, today) {
+  const hash = hashStr(subject.id);
+  const line = PET_LINES[hash % PET_LINES.length];
+  const qs = state.questions.filter((q) => q.subjectId === subject.id);
+  const xp = Math.max(subject.xp || 0, qs.reduce((n, q) => n + q.right, 0)); // never shrinks when you delete questions
+  let stage = 0;
+  PET_STAGE_AT.forEach((need, i) => { if (xp >= need) stage = i; });
+  const nextAt = PET_STAGE_AT[stage + 1] ?? null;
+  const from = PET_STAGE_AT[stage];
+  return {
+    subjectId: subject.id, subjectName: subject.name, emoji: line[stage], stage, title: PET_STAGE_TITLES[stage],
+    name: subject.petName || PET_NAMES[(hash >>> 4) % PET_NAMES.length], xp, nextAt,
+    progress: nextAt === null ? 100 : Math.round(((xp - from) / (nextAt - from)) * 100),
+    due: qs.filter((q) => q.due <= today).length, total: qs.length,
+  };
+}
+export const farmPets = (state, today) => state.subjects.map((s) => petFor(state, s, today));
+
+/** The hidden surprise: every find counts for the badge, but the bonus points are once a day. Returns bonus points. */
+export function findSecret(state, today) {
+  state.stats.secrets++;
+  if (state.lastParade === today) return 0;
+  state.lastParade = today;
+  state.stats.points += 10;
+  return 10;
+}
+
 // ---------- your study buddy ----------
 export const BUDDY_STAGES = [
   [1, "🥚", "Egg"], [2, "🐣", "Hatchling"], [3, "🐥", "Chick"], [5, "🐦", "Fledgling"],
@@ -434,12 +479,13 @@ export function emptyState() {
     settings: { dailyGoal: DEFAULT_GOAL },
     buddy: { name: "Pip" },
     chests: 0,
+    lastParade: "",
     owned: [],
     equipped: { palette: "", font: "", hat: "" },
     claims: {},
     stats: {
       points: 0, spent: 0, answered: 0, correct: 0, streak: 0, bestStreak: 0, lastDay: "",
-      perfectRounds: 0, goalDays: 0, created: 0, chestsOpened: 0, questsDone: 0, days: {}, badges: {},
+      perfectRounds: 0, goalDays: 0, created: 0, chestsOpened: 0, questsDone: 0, secrets: 0, days: {}, badges: {},
     },
   };
 }
@@ -459,7 +505,9 @@ export function sanitiseState(raw, catalogueIds = null) {
     const name = str(s && s.name, 60);
     if (!id || !name || subjectIds.has(id)) continue;
     subjectIds.add(id);
-    out.subjects.push({ id, name });
+    const petName = str(s && s.petName, 20);
+    const xp = Math.round(num(s && s.xp, 0, 1e7, 0));
+    out.subjects.push({ id, name, ...(petName ? { petName } : {}), ...(xp ? { xp } : {}) });
   }
 
   const questionIds = new Set();
@@ -497,6 +545,7 @@ export function sanitiseState(raw, catalogueIds = null) {
   out.settings.dailyGoal = Math.round(num(raw.settings && raw.settings.dailyGoal, MIN_GOAL, 200, DEFAULT_GOAL));
   out.buddy.name = str(raw.buddy && raw.buddy.name, 20) || "Pip";
   out.chests = Math.round(num(raw.chests, 0, 1000, 0));
+  out.lastParade = typeof raw.lastParade === "string" && DATE_RE.test(raw.lastParade) ? raw.lastParade : "";
   const known = (id) => !catalogueIds || catalogueIds.has(id);
   if (Array.isArray(raw.owned)) out.owned = [...new Set(raw.owned.map((x) => str(x, 60)).filter((x) => x && known(x)))].slice(0, 200);
   const eq = raw.equipped && typeof raw.equipped === "object" ? raw.equipped : {};
@@ -511,7 +560,7 @@ export function sanitiseState(raw, catalogueIds = null) {
   }
 
   const st = raw.stats && typeof raw.stats === "object" ? raw.stats : {};
-  for (const k of ["points", "spent", "answered", "correct", "streak", "bestStreak", "perfectRounds", "goalDays", "created", "chestsOpened", "questsDone"]) {
+  for (const k of ["points", "spent", "answered", "correct", "streak", "bestStreak", "perfectRounds", "goalDays", "created", "chestsOpened", "questsDone", "secrets"]) {
     out.stats[k] = Math.round(num(st[k], 0, 1e9, 0));
   }
   out.stats.lastDay = typeof st.lastDay === "string" && DATE_RE.test(st.lastDay) ? st.lastDay : "";

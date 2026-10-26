@@ -132,3 +132,22 @@ button[aria-pressed="true"] { cursor: default; }
   --shadow: none;
 }
 :root[data-palette] .toast { background: var(--pal-ink); color: var(--pal-bg); }
+
+/* ---------- farm ---------- */
+.brand { user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; touch-action: manipulation; }
+.farm { position: relative; border-radius: var(--radius); margin-bottom: 1rem; padding: 1rem .75rem 1.1rem; border: 1px solid var(--border); overflow: hidden;
+  background: linear-gradient(to bottom, color-mix(in srgb, var(--accent) 12%, var(--card)) 0 22%, color-mix(in srgb, var(--good) 22%, var(--card)) 22% 100%); }
+.farm::before { content: "☁️      ☀️      ☁️"; position: absolute; top: .2rem; left: 0; right: 0; text-align: center; letter-spacing: .35rem; opacity: .7; font-size: 1.2rem; pointer-events: none; }
+.farm-grid { position: relative; display: grid; gap: .6rem; grid-template-columns: repeat(auto-fill, minmax(7.5rem, 1fr)); padding-top: 1.2rem; }
+.pet-card { display: grid; justify-items: center; gap: .15rem; text-align: center; padding: .6rem .3rem; background: color-mix(in srgb, var(--card) 80%, transparent); }
+.pet-card.on { border-color: var(--accent); outline: 2px solid var(--accent); }
+.pet-emoji { position: relative; font-size: 2.6rem; line-height: 1.1; display: inline-block; animation: bob 2.4s ease-in-out infinite; }
+.pet-emoji .hat { position: absolute; top: -.7rem; left: 50%; transform: translateX(-50%) rotate(-8deg); font-size: 1.4rem; }
+.pet-name { font-weight: 700; overflow-wrap: anywhere; }
+@keyframes bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-.35rem); } }
+
+/* ---------- the hidden parade ---------- */
+.parade { position: fixed; inset: 0; pointer-events: none; z-index: 30; overflow: hidden; }
+.runner { position: absolute; top: var(--y); left: -4rem; font-size: var(--s); animation: march 6.5s linear var(--d) forwards; }
+@keyframes march { 0% { transform: translateX(0) translateY(0) rotate(-6deg); } 25% { transform: translateX(30vw) translateY(-1.2rem) rotate(6deg); } 50% { transform: translateX(60vw) translateY(0) rotate(-6deg); } 75% { transform: translateX(90vw) translateY(-1.2rem) rotate(6deg); } 100% { transform: translateX(calc(100vw + 5rem)) translateY(0) rotate(0); } }
+@media (prefers-reduced-motion: reduce) { .pet-emoji { animation: none; } .runner { animation: none; display: none; } }

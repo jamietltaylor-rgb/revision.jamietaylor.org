@@ -290,3 +290,38 @@ test("a goal chest can only be earned once a day, and goals have a minimum", () 
   assert.equal(out.stats.days["2026-10-26"].g, true);
   assert.ok(!("g" in out.stats.days["2026-10-27"]));
 });
+
+test("farm pets: one per subject, grow with right answers, keep their name", () => {
+  const s = L.emptyState(); const today = "2026-10-26";
+  s.subjects.push({ id: "bio", name: "Biology" }, { id: "geo", name: "Geography", petName: "Rex" });
+  for (let i = 0; i < 3; i++) s.questions.push({ id: "b" + i, subjectId: "bio", q: "q", a: "a", box: 1, due: i ? "2099-01-01" : today, right: 0, wrong: 0, choices: [] });
+  let [bio, geo] = L.farmPets(s, today);
+  assert.equal(bio.emoji, "🥚"); assert.equal(bio.title, "Egg"); assert.equal(bio.nextAt, 5); assert.equal(bio.due, 1); assert.equal(bio.total, 3);
+  assert.equal(geo.name, "Rex"); assert.ok(L.PET_NAMES.includes(bio.name));
+  assert.deepEqual([bio.name, bio.emoji], [L.petFor(s, s.subjects[0], today).name, L.petFor(s, s.subjects[0], today).emoji], "same pet every time");
+  s.subjects[0].xp = 5; assert.equal(L.petFor(s, s.subjects[0], today).title, "Baby");
+  s.subjects[0].xp = 20; assert.equal(L.petFor(s, s.subjects[0], today).stage, 2);
+  s.subjects[0].xp = 100; const grown = L.petFor(s, s.subjects[0], today);
+  assert.equal(grown.title, "Legend"); assert.equal(grown.nextAt, null); assert.equal(grown.progress, 100);
+  s.subjects[0].xp = 0; s.questions[0].right = 30; assert.equal(L.petFor(s, s.subjects[0], today).stage, 2, "older progress still counts");
+  s.questions = []; s.subjects[0].xp = 30; assert.equal(L.petFor(s, s.subjects[0], today).stage, 2, "deleting questions never shrinks a pet");
+  const kinds = new Set(Array.from({ length: 40 }, (_, i) => L.petFor(s, { id: "s" + i, name: "x", xp: 100 }, today).emoji));
+  assert.ok(kinds.size >= 4, "different subjects get different kinds of pet");
+});
+
+test("pet names and growth survive saving, and junk is dropped", () => {
+  const out = L.sanitiseState({ subjects: [{ id: "a", name: "A", petName: "  Bubbles  ", xp: 12.7 }, { id: "b", name: "B", petName: 5, xp: -3 }, { id: "c", name: "C", petName: "x".repeat(50) }] });
+  assert.equal(out.subjects[0].petName, "Bubbles"); assert.equal(out.subjects[0].xp, 13);
+  assert.deepEqual(out.subjects[1], { id: "b", name: "B" });
+  assert.equal(out.subjects[2].petName.length, 20);
+});
+
+test("the hidden surprise gives points once a day but counts every time", () => {
+  const s = L.emptyState();
+  assert.equal(L.findSecret(s, "2026-10-26"), 10); assert.equal(s.stats.points, 10);
+  assert.equal(L.findSecret(s, "2026-10-26"), 0); assert.equal(s.stats.points, 10); assert.equal(s.stats.secrets, 2);
+  assert.equal(L.findSecret(s, "2026-10-27"), 10);
+  assert.ok(L.newBadges(s).includes("secret"));
+  assert.equal(L.sanitiseState({ lastParade: "2026-10-26", stats: { secrets: 3 } }).lastParade, "2026-10-26");
+  assert.equal(L.sanitiseState({ lastParade: "nope" }).lastParade, "");
+});

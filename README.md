@@ -1,6 +1,6 @@
 # Revise
 
-A revision app: write or generate questions, answer them, and earn points, streaks, levels, badges, chests, weekly quests and unlockable looks for your study buddy.
+A revision app: write or generate questions, answer them, and earn points, streaks, levels, badges, chests, weekly quests and unlockable looks. Every subject hatches its own pet, and all your pets live together on a farm.
 
 - Plain HTML/CSS/JavaScript in `public/`. No build step.
 - Optional logins + cloud saving through Supabase (free), so your progress follows you between devices.
