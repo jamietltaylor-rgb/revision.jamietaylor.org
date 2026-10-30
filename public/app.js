@@ -24,7 +24,7 @@ let lastChest = null;
 const auth = { mode: "in", username: "", password: "", confirm: "", error: "", busy: false };
 const draft = {
   subjectId: "", newSubject: "", q: "", a: "", wrong: "",
-  topic: "", level: "GCSE", count: "10", style: "mixed", busy: false, aiError: "", prompt: "",
+  topic: "", level: "GCSE", count: "10", style: "mixed", busy: false, progress: "", aiError: "", prompt: "",
   pet: "buddy", paste: "", preview: null, filter: "all", search: "", treatName: "", treatCost: "",
 };
 
@@ -617,24 +617,47 @@ function checkPaste() {
   setPreview("paste", r.items, r.skipped);
   render();
 }
+const MAX_COUNT = 50;
+function wantedCount() { return Math.max(1, Math.min(MAX_COUNT, Math.round(Number(draft.count)) || 10)); }
 async function makeWithAi() {
   const topic = draft.topic.trim();
   if (!topic) return toast("Type a topic first.");
-  draft.busy = true; draft.aiError = ""; render();
+  const total = wantedCount();
+  draft.count = String(total);
+  draft.busy = true; draft.aiError = ""; draft.progress = ""; render();
+  const items = [];
+  const seen = new Set();
+  let failure = "";
   try {
-    const r = await cloud.generate({ topic, level: draft.level, count: Number(draft.count), style: draft.style });
-    const items = (Array.isArray(r && r.questions) ? r.questions : []).filter((x) => x && x.q && x.a);
-    if (!items.length) throw new Error("Nothing came back — try again.");
-    setPreview("ai", items);
+    // The AI writes up to 15 at a time, so bigger amounts are asked for in rounds.
+    for (let guard = 0; items.length < total && guard < 6; guard++) {
+      if (total > 15) { draft.progress = `Writing… ${items.length} of ${total}`; render(); }
+      const ask = Math.min(15, total - items.length);
+      const r = await cloud.generate({ topic, level: draft.level, count: ask, style: draft.style, avoid: items.slice(-30).map((x) => x.q) });
+      const got = (Array.isArray(r && r.questions) ? r.questions : []).filter((x) => x && x.q && x.a);
+      let fresh = 0;
+      for (const x of got) {
+        const k = L.normalise(x.q);
+        if (seen.has(k) || items.length >= total) continue;
+        seen.add(k); items.push(x); fresh++;
+      }
+      if (!fresh) break;
+    }
   } catch (e) {
-    draft.aiError = e.message || "Something went wrong.";
-    if (!cloud.signedIn) { draft.busy = false; return sessionEnded(); }
+    failure = e.message || "Something went wrong.";
+    if (!cloud.signedIn) { draft.busy = false; draft.progress = ""; return sessionEnded(); }
   }
-  draft.busy = false;
+  draft.busy = false; draft.progress = "";
+  if (items.length) {
+    setPreview("ai", items);
+    if (items.length < total) draft.aiError = `I managed ${items.length} of the ${total} you asked for${failure ? " (" + failure + ")" : ""}. You can press the button again for more.`;
+  } else {
+    draft.aiError = failure || "Nothing came back — try again.";
+  }
   render();
 }
 async function copyPrompt() {
-  draft.prompt = L.buildAiPrompt({ topic: draft.topic, level: draft.level, count: Number(draft.count), style: draft.style });
+  draft.prompt = L.buildAiPrompt({ topic: draft.topic, level: draft.level, count: wantedCount(), style: draft.style });
   let copied = false;
   try { await navigator.clipboard.writeText(draft.prompt); copied = true; } catch { copied = false; }
   toast(copied ? "Prompt copied — paste it into another AI ✓" : "Copy the prompt from the box below.");
@@ -694,11 +717,13 @@ function viewQuestions() {
       onkeydown: (e) => { if (e.key === "Enter" && cloud.enabled) makeWithAi(); } })),
     h("div", { class: "grid2" },
       h("label", {}, "Level", h("select", { onchange: (e) => { draft.level = e.target.value; } }, L.LEVELS.map((x) => opt(x, x, draft.level)))),
-      h("label", {}, "How many", h("select", { onchange: (e) => { draft.count = e.target.value; } }, ["5", "10", "15"].map((x) => opt(x, x, draft.count)))),
+      h("label", {}, `How many (1–${MAX_COUNT})`, h("input", { type: "number", inputmode: "numeric", min: "1", max: String(MAX_COUNT), step: "1", value: draft.count, "aria-label": "How many questions",
+        oninput: (e) => { draft.count = e.target.value; }, onblur: (e) => { draft.count = String(wantedCount()); e.target.value = draft.count; } }),
+        h("span", { class: "row", style: "gap:.35rem;margin-top:.35rem" }, [5, 10, 15, 25, 40].map((n) => h("button", { type: "button", class: "small" + (String(n) === String(draft.count) ? " primary" : ""), onclick: () => { draft.count = String(n); render(); } }, String(n))))),
       h("label", {}, "Style", h("select", { onchange: (e) => { draft.style = e.target.value; } }, [["mixed", "Mix of both"], ["typed", "Type the answer"], ["choice", "Multiple choice"]].map(([v, l]) => opt(v, l, draft.style))))),
     draft.aiError && h("div", { class: "banner", role: "alert" }, draft.aiError),
     h("div", { class: "row" },
-      cloud.enabled && h("button", { class: "primary", disabled: draft.busy, onclick: makeWithAi }, draft.busy ? "Writing questions…" : "✨ Make questions for me"),
+      cloud.enabled && h("button", { class: "primary", disabled: draft.busy, onclick: makeWithAi }, draft.busy ? (draft.progress || "Writing questions…") : "✨ Make questions for me"),
       h("button", { onclick: copyPrompt }, "Copy a prompt for another AI")),
     !cloud.enabled && h("p", { class: "small muted", style: "margin:.6rem 0 0" }, "Making questions inside the app needs sign-in to be switched on (see README). Until then, copy the prompt, paste it into another AI, and paste its answer below."),
     cloud.enabled && h("p", { class: "small muted", style: "margin:.6rem 0 0" }, "AI can make mistakes — check the answers against your notes before adding them."),
@@ -771,7 +796,16 @@ function viewQuestions() {
       h("button", { class: "danger", onclick: resetAll }, "Erase everything"),
       importInput));
 
-  return h("div", {}, subjectCard, makeCard, pasteCard, previewCard, oneCard, list, data);
+  const topicsCard = state.subjects.length > 0 && h("section", { class: "card" },
+    h("h2", {}, "Your topics"),
+    ...state.subjects.map((sub) => {
+      const n = state.questions.filter((q) => q.subjectId === sub.id).length;
+      return h("div", { class: "row space", style: "padding:.35rem 0;border-top:1px solid var(--border)" },
+        h("span", {}, h("b", {}, sub.name), h("span", { class: "muted small" }, `  ·  ${plural(n, "question")}`)),
+        h("button", { class: "small danger", "aria-label": `Delete topic ${sub.name}`, onclick: () => deleteSubject(sub.id) }, "🗑 Delete topic"));
+    }));
+
+  return h("div", {}, subjectCard, makeCard, pasteCard, previewCard, oneCard, topicsCard, list, data);
 }
 
 function exportData() {

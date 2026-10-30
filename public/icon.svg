@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#6366f1"/>
+      <stop offset="1" stop-color="#4338ca"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" fill="url(#g)"/>
+  <!-- notepad -->
+  <rect x="136" y="110" width="240" height="292" rx="28" fill="#ffffff"/>
+  <rect x="136" y="110" width="240" height="62" rx="28" fill="#c7d2fe"/>
+  <rect x="136" y="144" width="240" height="28" fill="#c7d2fe"/>
+  <circle cx="190" cy="112" r="15" fill="#4338ca"/>
+  <circle cx="256" cy="112" r="15" fill="#4338ca"/>
+  <circle cx="322" cy="112" r="15" fill="#4338ca"/>
+  <!-- tick -->
+  <path d="M188 280 l48 48 l92 -104" fill="none" stroke="#22c55e" stroke-width="30" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- spark -->
+  <path d="M388 70 l9 26 l26 9 l-26 9 l-9 26 l-9 -26 l-26 -9 l26 -9z" fill="#fde047"/>
+</svg>

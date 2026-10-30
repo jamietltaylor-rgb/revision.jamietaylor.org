@@ -36,7 +36,8 @@ export function friendlyError(status, body) {
 }
 
 export function createCloud(config, { fetchFn = (...a) => globalThis.fetch(...a), storage = null, now = () => Date.now() } = {}) {
-  const base = String(config.supabaseUrl || "").replace(/\/+$/, "");
+  let base = String(config.supabaseUrl || "").trim();
+  try { base = new URL(base).origin; } catch { base = base.replace(/\/+$/, ""); }
   const key = String(config.supabaseKey || "");
   const enabled = Boolean(base && key);
   const SESSION_KEY = "revise-session";
