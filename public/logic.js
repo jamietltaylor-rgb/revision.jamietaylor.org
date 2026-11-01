@@ -585,7 +585,7 @@ export function emptyState() {
     equipped: { palette: "", font: "", hat: "" },
     claims: {},
     exams: [],
-    plan: { perDay: 2, minutes: 30, offDays: [], done: {} },
+    plan: { perDay: 2, minutes: 30, offDays: [], exclude: [], done: {} },
     stats: {
       points: 0, spent: 0, answered: 0, correct: 0, streak: 0, bestStreak: 0, lastDay: "",
       perfectRounds: 0, goalDays: 0, created: 0, chestsOpened: 0, questsDone: 0, secrets: 0, days: {}, badges: {},
@@ -676,6 +676,7 @@ export function sanitiseState(raw, catalogueIds = null) {
   out.plan.perDay = Math.round(num(pl.perDay, 1, 6, 2));
   out.plan.minutes = Math.round(num(pl.minutes, 10, 180, 30));
   out.plan.offDays = [...new Set((Array.isArray(pl.offDays) ? pl.offDays : []).map(Number).filter((n) => Number.isInteger(n) && n >= 0 && n <= 6))].sort();
+  out.plan.exclude = [...new Set((Array.isArray(pl.exclude) ? pl.exclude : []).map((x) => str(x, 60)).filter(Boolean))].slice(0, 100);
   if (pl.done && typeof pl.done === "object") {
     for (const k of Object.keys(pl.done).filter((k) => /^\d{4}-\d{2}-\d{2}\|[^|]{1,60}\|\d$/.test(k)).sort().slice(-600)) {
       if (pl.done[k] === true) out.plan.done[k] = true;
@@ -805,8 +806,10 @@ export function buildTimetable(exams, plan, today, maxDays = 60) {
   const last = coming.reduce((m, e) => (e.date > m ? e.date : m), today);
   const span = Math.min(maxDays, daysBetween(today, last) + 1);
   const subjects = new Map();
+  const left_out = new Set(((plan && plan.exclude) || []).map(subjectKey)); // subjects the person doesn't want revision set for
   for (const e of coming) {
     const key = subjectKey(e.subject);
+    if (left_out.has(key)) continue;
     if (!subjects.has(key)) subjects.set(key, { key, name: e.subject, dates: [] });
     subjects.get(key).dates.push(e.date);
   }

@@ -321,6 +321,13 @@ function setPlan(patch) {
   save();
   render();
 }
+function toggleExclude(name) {
+  const key = L.subjectKey(name);
+  const has = state.plan.exclude.some((x) => L.subjectKey(x) === key);
+  setPlan({ exclude: has ? state.plan.exclude.filter((x) => L.subjectKey(x) !== key) : [...state.plan.exclude, name] });
+}
+const isLeftOut = (name) => state.plan.exclude.some((x) => L.subjectKey(x) === L.subjectKey(name));
+
 function toggleDone(id) {
   if (state.plan.done[id]) delete state.plan.done[id]; else state.plan.done[id] = true;
   save();
@@ -383,6 +390,7 @@ function viewPlan() {
   const names = [...new Set([...state.subjects.map((x) => x.name), ...state.exams.map((e) => e.subject)])];
   const table = L.buildTimetable(state.exams, state.plan, t);
   const planByDate = new Map(table.map((d) => [d.date, d]));
+  const examSubjects = [...new Map(upcoming.map((e) => [L.subjectKey(e.subject), e.subject])).values()];
 
   // ----- the calendar -----
   const first = new Date(`${planUI.month}-01T12:00:00`);
@@ -427,7 +435,8 @@ function viewPlan() {
         h("div", { class: "small muted" }, `${e.time ? e.time + " · " : ""}${inDays(daysAway(e.date)) === "today" ? "today" : sel < t ? "finished" : inDays(daysAway(e.date))}`),
         h("div", { class: "row", style: "margin-top:.35rem;gap:.4rem" },
           h("button", { class: "small", onclick: () => practise(e.subject) }, "Practise"),
-          h("button", { class: "small", onclick: () => makeQuestionsFor(e.subject, e.kind, e.board) }, "✨ Make past-paper style questions"))),
+          h("button", { class: "small", onclick: () => makeQuestionsFor(e.subject, e.kind, e.board) }, "✨ Make past-paper style questions"),
+          h("button", { class: "small", "aria-pressed": isLeftOut(e.subject) ? "true" : "false", onclick: () => toggleExclude(e.subject) }, isLeftOut(e.subject) ? "Add back to timetable" : "Leave out of timetable"))),
       h("button", { class: "ghost small danger", "aria-label": `Delete exam: ${e.subject}`, onclick: () => deleteExam(e.id) }, "✕"))),
     dayPlan && dayPlan.sessions.length > 0 && h("div", { style: "margin:.6rem 0" },
       h("div", { class: "small muted" }, "Revision planned"),
@@ -458,6 +467,11 @@ function viewPlan() {
     h("div", { class: "grid2" },
       h("label", {}, "Sessions a day", h("select", { "aria-label": "Sessions a day", onchange: (e) => setPlan({ perDay: Number(e.target.value) }) }, [1, 2, 3, 4, 5, 6].map((n) => opt(n, String(n), state.plan.perDay)))),
       h("label", {}, "Minutes each", h("select", { "aria-label": "Minutes each", onchange: (e) => setPlan({ minutes: Number(e.target.value) }) }, [15, 20, 25, 30, 45, 60, 90].map((n) => opt(n, `${n} min`, state.plan.minutes))))),
+    examSubjects.length > 0 && h("div", { style: "margin:.6rem 0" },
+      h("div", { class: "small muted", style: "margin-bottom:.2rem" }, "Subjects in your revision timetable (untick to leave one out — its exams still show on the calendar):"),
+      examSubjects.map((name) => h("label", { class: "row", style: "gap:.5rem;margin:0;padding:.2rem 0;font-weight:400" },
+        h("input", { type: "checkbox", style: "width:auto;min-height:0;margin:0", checked: !isLeftOut(name), "aria-label": `Include ${name} in the revision timetable`, onchange: () => toggleExclude(name) }),
+        h("span", {}, name, isLeftOut(name) && h("span", { class: "muted small" }, "  · left out"))))),
     h("div", { class: "small muted", style: "margin:.4rem 0" }, "Rest days (no revision set):"),
     h("div", { class: "row", style: "gap:.4rem" }, DAY_NAMES.map((n, i) => {
       const off = state.plan.offDays.includes(i);
