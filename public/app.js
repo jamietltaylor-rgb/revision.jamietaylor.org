@@ -253,7 +253,7 @@ function checkBadges() {
 }
 
 // ======================= PLAN (calendar of exams + revision timetable) =======================
-const planUI = { month: "", selected: "", subject: "", board: "Any exam board", kind: "GCSE", paper: "", time: "", paste: "", shown: 14 };
+const planUI = { month: "", selected: "", subject: "", board: "Any exam board", kind: "GCSE", paper: "", time: "", paste: "", preview: null, shown: 14 };
 const DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const longDate = (date) => new Date(`${date}T12:00:00`).toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" });
 const monthTitle = (m) => new Date(`${m}-01T12:00:00`).toLocaleDateString("en-GB", { month: "long", year: "numeric" });
@@ -286,24 +286,32 @@ function addExam(date) {
   toast(created ? `Exam added ✓ — and “${subject}” is now a subject in Questions` : "Exam added ✓");
   render();
 }
-function importExams() {
+function checkExams() {
   const r = L.parseExamList(planUI.paste, today());
   if (!r.exams.length) return toast("I couldn't find any dates in that. Try one exam per line, like:  Maths Paper 1 | 14 May 2027 | GCSE");
   const have = new Set(state.exams.map((e) => `${L.subjectKey(e.subject)}|${e.date}|${e.paper}`));
-  let added = 0, made = 0;
-  for (const e of r.exams) {
+  planUI.preview = { skipped: r.skipped, items: r.exams.map((e) => {
     const k = `${L.subjectKey(e.subject)}|${e.date}|${e.paper}`;
-    if (have.has(k) || e.date < today()) continue;
+    const note = have.has(k) ? "already in your list" : e.date < today() ? "date has passed" : "";
     have.add(k);
+    return { ...e, note, keep: !note };
+  }) };
+  render();
+}
+function confirmExams() {
+  const keep = planUI.preview.items.filter((e) => e.keep);
+  if (!keep.length) return toast("Tick at least one exam to add.");
+  let made = 0;
+  for (const { keep: _k, note: _n, ...e } of keep) {
     state.exams.push({ id: L.uid(), ...e });
     if (ensureSubjectNamed(e.subject).created) made++;
-    added++;
   }
   sortExams();
-  planUI.paste = "";
-  if (added) { const nextExam = state.exams.find((e) => e.date >= today()); if (nextExam) { planUI.month = nextExam.date.slice(0, 7); planUI.selected = nextExam.date; } }
+  planUI.preview = null; planUI.paste = "";
+  const nextExam = state.exams.find((e) => e.date >= today());
+  if (nextExam) { planUI.month = nextExam.date.slice(0, 7); planUI.selected = nextExam.date; }
   save();
-  toast(added ? `Added ${plural(added, "exam")} ✓${made ? ` and ${plural(made, "new subject")}` : ""}` : "Those exams were already in your list (or had passed).");
+  toast(`Added ${plural(keep.length, "exam")} ✓${made ? ` and ${plural(made, "new subject")}` : ""}`);
   render();
 }
 function deleteExam(id) {
@@ -481,11 +489,21 @@ function viewPlan() {
   // ----- list view, paste import -----
   const shown = table.slice(0, planUI.shown);
   const listCard = h("section", { class: "card" },
-    h("details", {},
+    h("details", { open: !!planUI.preview },
       h("summary", { style: "cursor:pointer;font-weight:700" }, `Paste a whole timetable, or see everything as a list (${upcoming.length} exam${upcoming.length === 1 ? "" : "s"})`),
       h("p", { class: "muted small", style: "margin:.6rem 0" }, "One exam per line — subject, date, and optionally the exam board, type, paper and time. Dates like 14 May 2027, 14/05/2027 or 2027-05-14 all work."),
       h("textarea", { "aria-label": "Exam timetable to paste", style: "min-height:7rem", placeholder: "Maths Paper 1 | 14 May 2027 | GCSE | AQA | 9:00\nBiology | 21/05/2027 | Mock\nEnglish Literature, 3 June 2027", oninput: (e) => { planUI.paste = e.target.value; } }, planUI.paste),
-      h("button", { style: "margin:.6rem 0", onclick: importExams }, "Add these exams"),
+      h("button", { style: "margin:.6rem 0", onclick: checkExams }, "Check the list"),
+      planUI.preview && h("div", { style: "border:1px solid var(--border);border-radius:12px;padding:.7rem;margin-bottom:1rem" },
+        h("b", {}, `Check these before adding (${planUI.preview.items.length})`),
+        h("p", { class: "small muted", style: "margin:.2rem 0 .4rem" }, "Untick anything you don't want in your timetable."),
+        planUI.preview.skipped > 0 && h("p", { class: "small muted" }, `${planUI.preview.skipped} line${planUI.preview.skipped === 1 ? "" : "s"} had no date and ${planUI.preview.skipped === 1 ? "was" : "were"} skipped.`),
+        ...planUI.preview.items.map((e) => h("label", { class: "pick" },
+          h("input", { type: "checkbox", style: "width:auto;min-height:0;margin:.2rem 0 0", checked: e.keep, "aria-label": `Add ${e.subject} on ${e.date}`, onchange: (ev) => { e.keep = ev.target.checked; render(); } }),
+          h("span", {}, h("b", {}, e.subject), e.paper ? ` · ${e.paper}` : "", h("span", { class: "a" }, `${longDate(e.date)} · ${e.kind}${e.board ? " · " + e.board : ""}${e.time ? " · " + e.time : ""}${e.note ? " · " + e.note : ""}`)))),
+        h("div", { class: "row", style: "margin-top:.6rem" },
+          h("button", { class: "primary", onclick: confirmExams }, `Add ${plural(planUI.preview.items.filter((e) => e.keep).length, "exam")}`),
+          h("button", { onclick: () => { planUI.preview = null; render(); } }, "Cancel"))),
       h("div", { class: "row space" }, h("h3", {}, "All your exams"), past > 0 && h("button", { class: "ghost small", onclick: clearPastExams }, `Clear ${past} finished`)),
       upcoming.length === 0 && h("p", { class: "muted" }, "No exams coming up yet."),
       upcoming.map((e) => h("div", { class: "item" },
