@@ -670,7 +670,7 @@ export function sanitiseState(raw, catalogueIds = null) {
     const subject = str(e && e.subject, 60);
     if (!id || !subject || examIds.has(id) || typeof e.date !== "string" || !validDate(e.date)) continue;
     examIds.add(id);
-    out.exams.push({ id, subject, kind: KINDS.includes(e.kind) ? e.kind : "Other", date: e.date, paper: str(e.paper, 40), time: str(e.time, 20) });
+    out.exams.push({ id, subject, kind: KINDS.includes(e.kind) ? e.kind : "Other", board: BOARDS.includes(e.board) && e.board !== "Any exam board" ? e.board : "", date: e.date, paper: str(e.paper, 40), time: str(e.time, 20) });
   }
   const pl = raw.plan && typeof raw.plan === "object" ? raw.plan : {};
   out.plan.perDay = Math.round(num(pl.perDay, 1, 6, 2));
@@ -772,8 +772,11 @@ export function parseExamList(text, today) {
     if (tm) { time = tm[1].replace(/\s+/g, "").replace(".", ":"); remaining = remaining.replace(tm[0], " "); }
     const parts = remaining.split(/\||\t|;|\s[–—-]\s|,/).map((p) => clean(p)).filter(Boolean);
     let kind = "Other";
+    let board = "";
     const kept = [];
     for (const p of parts) {
+      const bm = /^(aqa|edexcel|pearson(?:\s+edexcel)?|ocr|wjec(?:\s*\/\s*eduqas)?|eduqas|ccea|sqa)$/i.exec(p);
+      if (bm) { const w = bm[1].toLowerCase(); board = w.startsWith("wjec") || w === "eduqas" ? "WJEC / Eduqas" : w.includes("edexcel") || w.startsWith("pearson") ? "Edexcel" : w.toUpperCase(); continue; }
       const k = /^(mock|gcse|a[\s-]?level|as[\s-]?level|other)s?(\s+exams?)?$/i.exec(p);
       if (k) { const w = k[1].toLowerCase().replace(/[\s-]/g, ""); kind = w === "mock" ? "Mock" : w === "gcse" ? "GCSE" : w === "alevel" ? "A-level" : w === "aslevel" ? "AS-level" : "Other"; }
       else kept.push(p);
@@ -784,7 +787,7 @@ export function parseExamList(text, today) {
     if (pm) { paper = pm[1].replace(/\s+/g, " "); subject = subject.replace(pm[0], " "); }
     subject = clean(subject.replace(/\b(mock|gcse|a[\s-]?level|as[\s-]?level)\b/gi, " ").replace(/^[-:]+|[-:]+$/g, "")).slice(0, 60);
     if (!subject) { skipped++; continue; }
-    exams.push({ subject, kind, date, paper: paper.slice(0, 40), time: time.slice(0, 20) });
+    exams.push({ subject, kind, board, date, paper: paper.slice(0, 40), time: time.slice(0, 20) });
   }
   return { exams: exams.slice(0, 150), skipped };
 }
