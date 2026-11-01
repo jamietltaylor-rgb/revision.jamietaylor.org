@@ -301,13 +301,16 @@ function mergeAnswers(a, alts) {
   return out;
 }
 
-function toItem(parts, alts = [], src = "") {
+function toItem(parts, alts = [], src = "", marks = 0) {
   const cells = parts.map(clean);
   const q = cells[0];
   const a = cells[1];
   if (!q || !a) return null;
-  const choices = [...new Set(cells.slice(2).filter(Boolean))].filter((c) => normalise(c) !== normalise(a)).slice(0, 5);
+  const m = Math.round(Number(marks));
+  const exam = Number.isFinite(m) && m >= 1;
+  const choices = exam ? [] : [...new Set(cells.slice(2).filter(Boolean))].filter((c) => normalise(c) !== normalise(a)).slice(0, 5);
   const source = clean(src).slice(0, 80);
+  if (exam) return { q: q.slice(0, 800), a: a.slice(0, 1200), choices: [], exam: true, marks: Math.min(12, m), ...(source ? { src: source } : {}) };
   return { q: q.slice(0, 500), a: mergeAnswers(a.slice(0, 300), alts), choices: choices.map((c) => c.slice(0, 200)), ...(source ? { src: source } : {}) };
 }
 
@@ -327,7 +330,7 @@ function fromJson(text) {
       const wrong = row.wrong ?? row.choices ?? row.options ?? row.distractors ?? [];
       let alts = row.alt ?? row.alts ?? row.alternatives ?? row.also ?? row.accept ?? [];
       if (typeof alts === "string") alts = alts.split(/\s*[;|]\s*/);
-      item = toItem([q, a, ...(Array.isArray(wrong) ? wrong : [])], Array.isArray(alts) ? alts : [], typeof (row.src ?? row.source) === "string" ? (row.src ?? row.source) : "");
+      item = toItem([q, a, ...(Array.isArray(wrong) ? wrong : [])], Array.isArray(alts) ? alts : [], typeof (row.src ?? row.source) === "string" ? (row.src ?? row.source) : "", row.marks ?? row.mark ?? 0);
     }
     if (item) items.push(item); else skipped++;
   }
@@ -418,15 +421,28 @@ export const STYLES = { typed: "typed answers", choice: "multiple choice", mixed
 /** The text people copy into another AI (ChatGPT, Gemini…) to get questions this app can read. */
 export const BOARDS = ["Any exam board", "AQA", "Edexcel", "OCR", "WJEC / Eduqas", "CCEA", "SQA"];
 
-export function buildAiPrompt({ topic, level = "GCSE", count = 15, style = "mixed", paper = false, board = "" } = {}) {
+export function buildAiPrompt({ topic, level = "GCSE", count = 15, style = "mixed", paper = false, board = "", mode = "quick" } = {}) {
   const t = clean(topic).slice(0, 120) || "[type your topic here]";
   const n = Math.max(1, Math.min(50, Math.round(Number(count)) || 15));
+  const lvl = clean(level) || "GCSE";
+  const tailor = boardLine(board, lvl);
+  if (mode === "exam") {
+    return `Write ${Math.min(n, 20)} complete exam questions about "${t}" at ${lvl} level.${tailor}
+
+Reply with ONLY a JSON array, in exactly this shape:
+[{"q": "the full question as it would be printed on the paper", "marks": 4, "a": "mark scheme: each marking point separated by  ;  (one point per mark)"}]
+
+Rules:
+- Each question is worth between 2 and 6 marks (a mix), and has about one marking point per mark.
+- Use real exam command words (state, describe, explain, calculate, compare, evaluate) and the layout real papers use.
+- Marking points must be factually correct and short. No markdown, no numbering, no text outside the JSON.${paperLines(paper, board, lvl)}`;
+  }
   const styleLine = {
     typed: "Do not include wrong options — every question is answered by typing.",
     choice: "Give 3 wrong options for every question (so each one is multiple choice).",
     mixed: "Give 3 wrong options for about half the questions and none for the rest.",
   }[style] || "";
-  return `Write ${n} revision questions about "${t}" at ${clean(level) || "GCSE"} level.
+  return `Write ${n} revision questions about "${t}" at ${lvl} level.${tailor}
 
 Reply with ONLY the questions, one per line, in exactly this format:
 question | answer | wrong option 1 | wrong option 2 | wrong option 3
@@ -437,8 +453,12 @@ Rules:
 - Keep every answer short (1–6 words) so it can be typed, and make sure it is factually correct.
 - Don't use the "|" character inside a question or answer.
 - If an answer could correctly be worded another way (a synonym, abbreviation or alternative), add the alternatives to the answer separated by semicolons, like  CO2; carbon dioxide
-- Cover a range of subtopics and don't repeat questions.${paperLines(paper, board, level)}`;
+- Cover a range of subtopics and don't repeat questions.${paperLines(paper, board, lvl)}`;
 }
+export const boardLine = (board, level) => {
+  const b = BOARDS.includes(board) && board !== "Any exam board" ? board : "";
+  return b ? `\nFollow the ${b} specification for ${clean(level) || "GCSE"}: use its topic names, terminology and the way its questions are worded.` : "";
+};
 function paperLines(paper, board, level) {
   if (!paper) return "";
   const b = BOARDS.includes(board) && board !== "Any exam board" ? board : "the main UK exam boards";
@@ -577,7 +597,7 @@ export function emptyState() {
     questions: [],
     treats: [],
     redeemed: [],
-    settings: { dailyGoal: DEFAULT_GOAL },
+    settings: { dailyGoal: DEFAULT_GOAL, board: "" },
     buddy: { name: "Pip" },
     chests: 0,
     lastParade: "",
@@ -618,8 +638,9 @@ export function sanitiseState(raw, catalogueIds = null) {
   for (const q of (Array.isArray(raw.questions) ? raw.questions : []).slice(0, 5000)) {
     if (!q || typeof q !== "object") continue;
     const id = str(q.id, 40);
-    const text = str(q.q, 500);
-    const answer = str(q.a, 300);
+    const isExam = q.exam === true && Number.isFinite(q.marks) && q.marks >= 1;
+    const text = str(q.q, isExam ? 800 : 500);
+    const answer = str(q.a, isExam ? 1200 : 300);
     const subjectId = str(q.subjectId, 40);
     if (!id || !text || !answer || !subjectIds.has(subjectId) || questionIds.has(id)) continue;
     questionIds.add(id);
@@ -627,6 +648,7 @@ export function sanitiseState(raw, catalogueIds = null) {
       id, subjectId, q: text, a: answer,
       choices: (Array.isArray(q.choices) ? q.choices : []).map((c) => str(c, 200)).filter(Boolean).slice(0, 5),
       ...(str(q.src, 80) ? { src: str(q.src, 80) } : {}),
+      ...(isExam ? { exam: true, marks: Math.min(12, Math.round(q.marks)) } : {}),
       box: Math.round(num(q.box, 1, MAX_BOX, 1)),
       due: typeof q.due === "string" && DATE_RE.test(q.due) ? q.due : "1970-01-01",
       right: Math.round(num(q.right, 0, 1e6, 0)),
@@ -647,6 +669,7 @@ export function sanitiseState(raw, catalogueIds = null) {
       if (name) out.redeemed.push({ name, cost: Math.round(num(r.cost, 0, 100000, 0)), date: typeof r.date === "string" && DATE_RE.test(r.date) ? r.date : "" });
     }
   }
+  out.settings.board = raw.settings && BOARDS.includes(raw.settings.board) && raw.settings.board !== "Any exam board" ? raw.settings.board : "";
   out.settings.dailyGoal = Math.round(num(raw.settings && raw.settings.dailyGoal, MIN_GOAL, 200, DEFAULT_GOAL));
   out.buddy.name = str(raw.buddy && raw.buddy.name, 20) || "Pip";
   out.chests = Math.round(num(raw.chests, 0, 1000, 0));

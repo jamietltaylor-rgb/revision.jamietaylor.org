@@ -24,7 +24,7 @@ let lastChest = null;
 const auth = { mode: "in", username: "", password: "", confirm: "", error: "", busy: false };
 const draft = {
   subjectId: "", newSubject: "", q: "", a: "", wrong: "",
-  topic: "", level: "GCSE", count: "10", style: "mixed", busy: false, progress: "", aiError: "", prompt: "", paper: false, board: "Any exam board",
+  topic: "", level: "GCSE", count: "10", style: "mixed", busy: false, progress: "", aiError: "", prompt: "", paper: false, board: "Any exam board", boardInit: false, mode: "quick",
   pet: "buddy", paste: "", preview: null, filter: "all", search: "", treatName: "", treatCost: "",
 };
 
@@ -356,7 +356,8 @@ function makeQuestionsFor(name, kind, board) {
   draft.topic = name;
   draft.level = kind === "A-level" || kind === "AS-level" ? "A-level" : "GCSE";
   draft.paper = true;
-  draft.board = board && L.BOARDS.includes(board) ? board : "Any exam board";
+  draft.boardInit = true;
+  draft.board = board && L.BOARDS.includes(board) ? board : (state.settings.board || "Any exam board");
   draft.preview = null;
   draft.subjectId = sub ? sub.id : "__new";
   if (!sub) draft.newSubject = name;
@@ -723,8 +724,28 @@ function viewQuestion() {
     bar(Math.round((session.index / total) * 100), "Round progress"));
 
   const body = h("div", {},
-    h("div", { class: "row", style: "margin-top:.8rem" }, h("span", { class: "tag" }, subject ? subject.name : "Question"), q.src && h("span", { class: "tag" }, `📄 ${q.src}`), item.retry && h("span", { class: "tag" }, "Second chance — no points")),
+    h("div", { class: "row", style: "margin-top:.8rem" }, h("span", { class: "tag" }, subject ? subject.name : "Question"), q.exam && h("span", { class: "tag" }, `📝 ${q.marks} mark${q.marks === 1 ? "" : "s"}`), q.src && h("span", { class: "tag" }, `📄 ${q.src}`), item.retry && h("span", { class: "tag" }, "Second chance — no points")),
     h("p", { class: "quiz-q" }, q.q));
+
+  if (q.exam) {
+    if (session.stage === "ask") {
+      const box = h("textarea", { id: "answer", maxlength: 2000, style: "min-height:8rem", placeholder: "Write your answer here (or think it through), then check the mark scheme", "aria-label": "Your answer" });
+      body.append(box, h("div", { class: "row", style: "margin-top:.7rem" },
+        h("button", { class: "primary", onclick: () => showScheme(box.value) }, "Show mark scheme"),
+        h("button", { class: "ghost", onclick: () => showScheme("") }, "I don't know")));
+      setTimeout(() => box.focus(), 0);
+    } else {
+      const points = q.a.split(/\s*[;•]\s*/).filter(Boolean);
+      body.append(h("div", { class: "verdict", role: "status" }, "Mark scheme",
+        session.given && h("span", { class: "ans" }, `You wrote: ${session.given}`)),
+        h("ul", { style: "margin:.6rem 0 .6rem 1.1rem;padding:0" }, points.map((x) => h("li", {}, x))),
+        h("p", { class: "small muted" }, `Mark yourself honestly: would you have got most of the ${q.marks} mark${q.marks === 1 ? "" : "s"}?`),
+        h("div", { class: "row" },
+          h("button", { class: "primary", onclick: () => commit(true) }, "Got most of the marks ✔"),
+          h("button", { onclick: () => commit(false) }, "Not yet ✗")));
+    }
+    return h("section", { class: "card" }, head, body);
+  }
 
   if (session.stage === "ask") {
     const dontKnow = h("button", { class: "ghost", onclick: () => check("", true) }, "I don't know");
@@ -751,6 +772,14 @@ function viewQuestion() {
     setTimeout(() => next.focus(), 0);
   }
   return h("section", { class: "card" }, head, body);
+}
+
+function showScheme(written) {
+  session.verdict = false;
+  session.given = String(written || "").trim();
+  session.dontKnow = !session.given;
+  session.stage = "feedback";
+  render();
 }
 
 function acceptMine(q) {
@@ -866,7 +895,7 @@ function ensureSubject(fallbackName = "") {
   }
   return draft.subjectId;
 }
-const makeQuestion = (subjectId, q, a, choices = [], src = "") => ({ id: L.uid(), subjectId, q, a, choices, ...(src ? { src: String(src).slice(0, 80) } : {}), box: 1, due: today(), right: 0, wrong: 0 });
+const makeQuestion = (subjectId, q, a, choices = [], src = "", exam = null) => ({ id: L.uid(), subjectId, q, a, choices, ...(src ? { src: String(src).slice(0, 80) } : {}), ...(exam ? { exam: true, marks: exam.marks } : {}), box: 1, due: today(), right: 0, wrong: 0 });
 
 function addQuestion() {
   const q = draft.q.trim();
@@ -897,7 +926,8 @@ function checkPaste() {
   render();
 }
 const MAX_COUNT = 50;
-function wantedCount() { return Math.max(1, Math.min(MAX_COUNT, Math.round(Number(draft.count)) || 10)); }
+const maxCount = () => (draft.mode === "exam" ? 20 : MAX_COUNT);
+function wantedCount() { return Math.max(1, Math.min(maxCount(), Math.round(Number(draft.count)) || (draft.mode === "exam" ? 5 : 10))); }
 async function makeWithAi() {
   const topic = draft.topic.trim();
   if (!topic) return toast("Type a topic first.");
@@ -908,11 +938,12 @@ async function makeWithAi() {
   const seen = new Set();
   let failure = "";
   try {
-    // The AI writes up to 15 at a time, so bigger amounts are asked for in rounds.
-    for (let guard = 0; items.length < total && guard < 6; guard++) {
-      if (total > 15) { draft.progress = `Writing… ${items.length} of ${total}`; render(); }
-      const ask = Math.min(15, total - items.length);
-      const r = await cloud.generate({ topic, level: draft.level, count: ask, style: draft.style, paper: draft.paper, board: draft.board, avoid: items.slice(-30).map((x) => x.q) });
+    // The AI writes up to 15 quick questions (or 5 full exam questions) at a time, so bigger amounts are asked for in rounds.
+    const chunk = draft.mode === "exam" ? 5 : 15;
+    for (let guard = 0; items.length < total && guard < Math.ceil(total / chunk) + 2; guard++) {
+      if (total > chunk) { draft.progress = `Writing… ${items.length} of ${total}`; render(); }
+      const ask = Math.min(chunk, total - items.length);
+      const r = await cloud.generate({ topic, level: draft.level, count: ask, style: draft.style, paper: draft.paper, board: draft.board, mode: draft.mode, avoid: items.slice(-30).map((x) => x.q) });
       const got = (Array.isArray(r && r.questions) ? r.questions : []).filter((x) => x && x.q && x.a);
       let fresh = 0;
       for (const x of got) {
@@ -936,7 +967,7 @@ async function makeWithAi() {
   render();
 }
 async function copyPrompt() {
-  draft.prompt = L.buildAiPrompt({ topic: draft.topic, level: draft.level, count: wantedCount(), style: draft.style, paper: draft.paper, board: draft.board });
+  draft.prompt = L.buildAiPrompt({ topic: draft.topic, level: draft.level, count: wantedCount(), style: draft.style, paper: draft.paper, board: draft.board, mode: draft.mode });
   let copied = false;
   try { await navigator.clipboard.writeText(draft.prompt); copied = true; } catch { copied = false; }
   toast(copied ? "Prompt copied — paste it into another AI ✓" : "Copy the prompt from the box below.");
@@ -945,14 +976,24 @@ async function copyPrompt() {
 function addPreview() {
   const keep = draft.preview.items.filter((it) => it.keep);
   if (!keep.length) return toast("Tick at least one question to add.");
-  const subjectId = ensureSubject(draft.topic);
-  if (!subjectId) return;
-  for (const it of keep) state.questions.push(makeQuestion(subjectId, it.q, it.a, it.choices || [], it.src || ""));
+  let subjectId = null, examSubjectId = null, examSubjectName = "";
+  if (keep.some((it) => !it.exam)) { subjectId = ensureSubject(draft.topic); if (!subjectId) return; }
+  if (keep.some((it) => it.exam)) {
+    // complete exam questions live in their own topic, e.g. "Biology – Exam questions"
+    const chosen = state.subjects.find((x) => x.id === draft.subjectId);
+    const base = (chosen ? chosen.name : draft.newSubject.trim() || draft.topic.trim()).replace(/ – Exam questions$/, "").slice(0, 40);
+    if (!base) return toast("Give the subject a name first.");
+    examSubjectName = `${base} – Exam questions`;
+    const made = ensureSubjectNamed(examSubjectName).subject;
+    if (!made) return toast("You have too many subjects already — delete one first.");
+    examSubjectId = made.id;
+  }
+  for (const it of keep) state.questions.push(it.exam ? makeQuestion(examSubjectId, it.q, it.a, [], it.src || "", { marks: it.marks }) : makeQuestion(subjectId, it.q, it.a, it.choices || [], it.src || ""));
   state.stats.created += keep.length;
   draft.preview = null; draft.paste = ""; draft.prompt = "";
   checkBadges();
   save();
-  toast(`Added ${plural(keep.length, "question")} ✓`);
+  toast(examSubjectName ? `Added ${plural(keep.length, "question")} to “${examSubjectName}” ✓` : `Added ${plural(keep.length, "question")} ✓`);
   render();
 }
 function deleteQuestion(id) {
@@ -975,6 +1016,7 @@ function deleteSubject(id) {
 }
 
 function viewQuestions() {
+  if (!draft.boardInit) { draft.boardInit = true; if (state.settings.board) draft.board = state.settings.board; }
   if (draft.subjectId !== "__new" && !state.subjects.some((s) => s.id === draft.subjectId)) draft.subjectId = state.subjects[0] ? state.subjects[0].id : "__new";
   if (draft.filter !== "all" && !state.subjects.some((s) => s.id === draft.filter)) draft.filter = "all";
 
@@ -996,15 +1038,19 @@ function viewQuestions() {
       onkeydown: (e) => { if (e.key === "Enter" && cloud.enabled) makeWithAi(); } })),
     h("div", { class: "grid2" },
       h("label", {}, "Level", h("select", { onchange: (e) => { draft.level = e.target.value; } }, L.LEVELS.map((x) => opt(x, x, draft.level)))),
-      h("label", {}, `How many (1–${MAX_COUNT})`, h("input", { type: "number", inputmode: "numeric", min: "1", max: String(MAX_COUNT), step: "1", value: draft.count, "aria-label": "How many questions",
+      h("label", {}, `How many (1–${maxCount()})`, h("input", { type: "number", inputmode: "numeric", min: "1", max: String(maxCount()), step: "1", value: draft.count, "aria-label": "How many questions",
         oninput: (e) => { draft.count = e.target.value; }, onblur: (e) => { draft.count = String(wantedCount()); e.target.value = draft.count; } }),
-        h("span", { class: "row", style: "gap:.35rem;margin-top:.35rem" }, [5, 10, 15, 25, 40].map((n) => h("button", { type: "button", class: "small" + (String(n) === String(draft.count) ? " primary" : ""), onclick: () => { draft.count = String(n); render(); } }, String(n))))),
-      h("label", {}, "Style", h("select", { onchange: (e) => { draft.style = e.target.value; } }, [["mixed", "Mix of both"], ["typed", "Type the answer"], ["choice", "Multiple choice"]].map(([v, l]) => opt(v, l, draft.style))))),
+        h("span", { class: "row", style: "gap:.35rem;margin-top:.35rem" }, (draft.mode === "exam" ? [3, 5, 10, 15, 20] : [5, 10, 15, 25, 40]).map((n) => h("button", { type: "button", class: "small" + (String(n) === String(draft.count) ? " primary" : ""), onclick: () => { draft.count = String(n); render(); } }, String(n))))),
+      draft.mode === "quick" && h("label", {}, "Style", h("select", { onchange: (e) => { draft.style = e.target.value; } }, [["mixed", "Mix of both"], ["typed", "Type the answer"], ["choice", "Multiple choice"]].map(([v, l]) => opt(v, l, draft.style)))),
+      h("label", {}, "Exam board", h("select", { "aria-label": "Exam board", onchange: (e) => { draft.board = e.target.value; state.settings.board = e.target.value === "Any exam board" ? "" : e.target.value; save(); render(); } }, L.BOARDS.map((x) => opt(x, x, draft.board))))),
+    h("label", {}, "Type of questions", h("select", { "aria-label": "Type of questions", onchange: (e) => { draft.mode = e.target.value; if (draft.mode === "exam" && Number(draft.count) > 20) draft.count = "5"; render(); } },
+      [["quick", "Quick questions (short answers)"], ["exam", "Complete exam questions (marks + mark scheme)"]].map(([v, l]) => opt(v, l, draft.mode)))),
+    draft.mode === "exam" && h("p", { class: "small muted", style: "margin:0 0 .6rem" }, "Full questions like the ones on a paper, each worth 2–6 marks. You write your answer, check the mark scheme and mark yourself. They're saved as their own topic, like “Biology – Exam questions”, so they stay separate from your quick questions."),
+    h("p", { class: "small muted", style: "margin:0 0 .4rem" }, draft.board !== "Any exam board" ? `Questions will follow the ${draft.board} specification. Your board is remembered.` : "Pick your exam board and the questions will follow its specification. It's remembered for next time."),
     h("label", { class: "row", style: "gap:.6rem;font-weight:600;margin:.3rem 0 .4rem" },
       h("input", { type: "checkbox", style: "width:auto;min-height:0;margin:0", checked: draft.paper, onchange: (e) => { draft.paper = e.target.checked; render(); } }),
       h("span", {}, "📄 Past-paper style questions")),
     draft.paper && h("div", {},
-      h("label", {}, "Exam board", h("select", { onchange: (e) => { draft.board = e.target.value; render(); } }, L.BOARDS.map((x) => opt(x, x, draft.board)))),
       h("p", { class: "small muted", style: "margin:0 0 .7rem" },
         "Questions are written to match real exam papers (same topics, wording and command words) and are tagged “past-paper style”. Real papers are copyrighted and an AI can't reliably quote them, so for the genuine ones use the board's own site: ",
         ...[["AQA", "https://www.aqa.org.uk/find-past-papers-and-mark-schemes"], ["Edexcel", "https://qualifications.pearson.com/en/support/support-topics/exams/past-papers.html"], ["OCR", "https://www.ocr.org.uk/qualifications/past-paper-finder/"], ["WJEC", "https://www.wjec.co.uk/students/past-papers/"]]
@@ -1035,7 +1081,7 @@ function viewQuestions() {
       p.skipped > 0 && h("p", { class: "small muted" }, `${plural(p.skipped, "line")} couldn't be read and ${p.skipped === 1 ? "was" : "were"} skipped.`),
       p.items.map((it) => h("label", { class: "pick" },
         h("input", { type: "checkbox", checked: it.keep, onchange: (e) => { it.keep = e.target.checked; render(); } }),
-        h("span", {}, h("b", {}, it.q), h("span", { class: "a" }, `Answer: ${it.a}${it.choices && it.choices.length ? `  ·  wrong options: ${it.choices.join(", ")}` : ""}`), it.duplicate && h("span", { class: "tag" }, "already in this subject")))),
+        h("span", {}, h("b", {}, it.q), h("span", { class: "a" }, `${it.exam ? `Mark scheme (${it.marks} marks)` : "Answer"}: ${it.a}${it.choices && it.choices.length ? `  ·  wrong options: ${it.choices.join(", ")}` : ""}`), it.duplicate && h("span", { class: "tag" }, "already in this subject")))),
       h("div", { class: "row", style: "margin-top:.8rem" },
         h("button", { class: "primary", onclick: addPreview }, `Add ${plural(picked, "question")}`),
         h("button", { onclick: () => { draft.preview = null; render(); } }, "Cancel")));
@@ -1058,7 +1104,7 @@ function viewQuestions() {
     listBox.replaceChildren(...[
       shown.length === 0 && h("p", { class: "muted" }, state.questions.length ? "No questions match." : "No questions yet."),
       ...shown.slice(0, 150).map((q) => h("div", { class: "item" },
-        h("div", { class: "txt" }, h("div", {}, q.q), h("div", { class: "a" }, `Answer: ${q.a}${q.choices.length ? "  ·  multiple choice" : ""}`),
+        h("div", { class: "txt" }, h("div", {}, q.q), h("div", { class: "a" }, q.exam ? `Mark scheme (${q.marks} marks): ${q.a}` : `Answer: ${q.a}${q.choices.length ? "  ·  multiple choice" : ""}`),
           h("div", { class: "small muted" }, `${q.src ? "📄 " + q.src + " · " : ""}${names.get(q.subjectId) || ""} · box ${q.box}/5 · next ${q.due <= today() ? "now" : niceDate(q.due)}`)),
         h("button", { class: "ghost small danger", "aria-label": `Delete question: ${q.q}`, onclick: () => deleteQuestion(q.id) }, "✕"))),
       shown.length > 150 && h("p", { class: "muted small" }, `Showing the first 150 of ${shown.length}. Use the search box to narrow it down.`),
