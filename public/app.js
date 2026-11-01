@@ -4,7 +4,7 @@ import { CONFIG } from "./config.js";
 import { createCloud, displayName } from "./cloud.js";
 
 const LOCAL_KEY = "revise-app-v1"; // used when logins aren't switched on, and for progress made before accounts existed
-const TABS = [["home", "🏠", "Home"], ["revise", "📝", "Revise"], ["questions", "✏️", "Questions"], ["rewards", "🏆", "Rewards"], ["farm", "🌾", "Farm"]];
+const TABS = [["home", "🏠", "Home"], ["revise", "📝", "Revise"], ["questions", "✏️", "Questions"], ["rewards", "🏆", "Rewards"], ["farm", "🌾", "Farm"], ["plan", "📅", "Plan"]];
 const TAB_IDS = TABS.map((t) => t[0]);
 const CATALOGUE = new Set(Shop.ITEMS.map((i) => i.id));
 
@@ -24,7 +24,7 @@ let lastChest = null;
 const auth = { mode: "in", username: "", password: "", confirm: "", error: "", busy: false };
 const draft = {
   subjectId: "", newSubject: "", q: "", a: "", wrong: "",
-  topic: "", level: "GCSE", count: "10", style: "mixed", busy: false, progress: "", aiError: "", prompt: "",
+  topic: "", level: "GCSE", count: "10", style: "mixed", busy: false, progress: "", aiError: "", prompt: "", paper: false, board: "Any exam board",
   pet: "buddy", paste: "", preview: null, filter: "all", search: "", treatName: "", treatCost: "",
 };
 
@@ -252,6 +252,174 @@ function checkBadges() {
   }
 }
 
+// ======================= PLAN (exams + revision timetable) =======================
+const planUI = { subject: "", kind: "GCSE", date: "", paper: "", time: "", paste: "", shown: 14 };
+const DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+const longDate = (date) => new Date(`${date}T12:00:00`).toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" });
+const findSubject = (name) => state.subjects.find((x) => L.subjectKey(x.name) === L.subjectKey(name));
+const daysAway = (date) => L.daysBetween(today(), date);
+const inDays = (n) => (n === 0 ? "today" : n === 1 ? "tomorrow" : `in ${n} days`);
+
+function addExam() {
+  const subject = planUI.subject.trim();
+  if (!subject) return toast("Type the subject first.");
+  if (!planUI.date) return toast("Pick the exam date.");
+  if (planUI.date < today()) return toast("That date has already passed.");
+  state.exams.push({ id: L.uid(), subject: subject.slice(0, 60), kind: planUI.kind, date: planUI.date, paper: planUI.paper.trim().slice(0, 40), time: planUI.time.trim().slice(0, 20) });
+  state.exams.sort((a, b) => a.date.localeCompare(b.date) || a.subject.localeCompare(b.subject));
+  planUI.subject = ""; planUI.paper = ""; planUI.time = "";
+  save();
+  toast("Exam added ✓");
+  render();
+}
+function importExams() {
+  const r = L.parseExamList(planUI.paste, today());
+  if (!r.exams.length) return toast("I couldn't find any dates in that. Try one exam per line, like:  Maths Paper 1 | 14 May 2027 | GCSE");
+  const have = new Set(state.exams.map((e) => `${L.subjectKey(e.subject)}|${e.date}|${e.paper}`));
+  let added = 0;
+  for (const e of r.exams) {
+    const k = `${L.subjectKey(e.subject)}|${e.date}|${e.paper}`;
+    if (have.has(k) || e.date < today()) continue;
+    have.add(k);
+    state.exams.push({ id: L.uid(), ...e });
+    added++;
+  }
+  state.exams.sort((a, b) => a.date.localeCompare(b.date) || a.subject.localeCompare(b.subject));
+  planUI.paste = "";
+  save();
+  toast(added ? `Added ${plural(added, "exam")} ✓${r.skipped ? ` (${r.skipped} line${r.skipped === 1 ? "" : "s"} skipped)` : ""}` : "Those exams were already in your list (or had passed).");
+  render();
+}
+function deleteExam(id) {
+  state.exams = state.exams.filter((e) => e.id !== id);
+  save();
+  render();
+}
+function clearPastExams() {
+  state.exams = state.exams.filter((e) => e.date >= today());
+  save();
+  render();
+}
+function setPlan(patch) {
+  Object.assign(state.plan, patch);
+  save();
+  render();
+}
+function toggleDone(id) {
+  if (state.plan.done[id]) delete state.plan.done[id]; else state.plan.done[id] = true;
+  save();
+  render();
+}
+function practise(name) {
+  const sub = findSubject(name);
+  if (sub && state.questions.some((q) => q.subjectId === sub.id)) {
+    startSession(sub.id, "10");
+    if (session) go("revise");
+  } else {
+    makeQuestionsFor(name, "");
+    toast("No questions for that subject yet — make some here first.");
+  }
+}
+function makeQuestionsFor(name, kind) {
+  const sub = findSubject(name);
+  draft.topic = name;
+  draft.level = kind === "A-level" || kind === "AS-level" ? "A-level" : "GCSE";
+  draft.paper = true;
+  draft.preview = null;
+  if (sub) draft.subjectId = sub.id; else { draft.subjectId = "__new"; draft.newSubject = name; }
+  go("questions");
+}
+
+function todaysPlan() {
+  const t = today();
+  const day = L.buildTimetable(state.exams, state.plan, t, 1)[0];
+  return day || { date: t, sessions: [], exams: [], off: false };
+}
+
+function planHomeCard() {
+  const t = today();
+  const upcoming = state.exams.filter((e) => e.date >= t).sort((a, b) => a.date.localeCompare(b.date));
+  if (!upcoming.length) return null;
+  const next = upcoming[0];
+  const day = todaysPlan();
+  return h("section", { class: "card" },
+    h("div", { class: "row space" }, h("h2", {}, "📅 Coming up"), h("button", { class: "ghost small", onclick: () => go("plan") }, "Open plan")),
+    h("p", { style: "margin:0 0 .5rem" }, h("b", {}, `${next.subject}${next.paper ? " " + next.paper : ""}`), ` ${next.kind === "Other" ? "exam" : next.kind + " exam"} ${inDays(daysAway(next.date))} · ${longDate(next.date)}`),
+    day.exams.length > 0 && h("p", { class: "banner", style: "margin:.4rem 0" }, `Exam today: ${day.exams.map((e) => e.subject).join(", ")} — good luck! 🍀`),
+    day.sessions.length > 0
+      ? h("div", {}, h("div", { class: "small muted", style: "margin:.4rem 0" }, "Today's revision"),
+          day.sessions.map((x) => h("div", { class: "row space", style: "padding:.3rem 0;border-top:1px solid var(--border)" },
+            h("span", {}, state.plan.done[x.id] ? "✅ " : "⬜ ", h("b", {}, x.subject), h("span", { class: "muted small" }, `  ${x.minutes} min · ${x.phase}`)),
+            h("button", { class: "small", onclick: () => practise(x.subject) }, "Practise"))))
+      : h("p", { class: "small muted", style: "margin:.2rem 0 0" }, day.off ? "Today is a rest day 😴" : "Nothing planned for today."));
+}
+
+function viewPlan() {
+  const t = today();
+  const opt = (value, label, current) => h("option", { value, selected: String(value) === String(current) }, label);
+  const upcoming = state.exams.filter((e) => e.date >= t);
+  const past = state.exams.length - upcoming.length;
+  const names = [...new Set([...state.subjects.map((x) => x.name), ...state.exams.map((e) => e.subject)])];
+
+  const addCard = h("section", { class: "card" },
+    h("h1", {}, "Exam timetable"),
+    h("p", { class: "muted" }, "Add your mocks and real exams. The app then builds a revision timetable that gives sooner exams more time and never sets a subject on its own exam day."),
+    h("div", { class: "grid2" },
+      h("label", {}, "Subject", h("input", { type: "text", list: "plan-subjects", maxlength: 60, placeholder: "e.g. Maths", value: planUI.subject, oninput: (e) => { planUI.subject = e.target.value; } })),
+      h("label", {}, "Type", h("select", { onchange: (e) => { planUI.kind = e.target.value; } }, L.KINDS.map((k) => opt(k, k, planUI.kind)))),
+      h("label", {}, "Date", h("input", { type: "date", min: t, value: planUI.date, "aria-label": "Exam date", onchange: (e) => { planUI.date = e.target.value; } })),
+      h("label", {}, "Paper (optional)", h("input", { type: "text", maxlength: 40, placeholder: "e.g. Paper 1", value: planUI.paper, oninput: (e) => { planUI.paper = e.target.value; } })),
+      h("label", {}, "Time (optional)", h("input", { type: "text", maxlength: 20, placeholder: "e.g. 9:00", value: planUI.time, oninput: (e) => { planUI.time = e.target.value; } }))),
+    h("datalist", { id: "plan-subjects" }, names.map((n) => h("option", { value: n }))),
+    h("button", { class: "primary", onclick: addExam }, "Add exam"),
+    h("details", { style: "margin-top:1rem" },
+      h("summary", { style: "cursor:pointer;font-weight:600" }, "Or paste your whole timetable"),
+      h("p", { class: "muted small", style: "margin:.6rem 0" }, "One exam per line — subject, date, and optionally the type, paper and time. Dates like 14 May 2027, 14/05/2027 or 2027-05-14 all work."),
+      h("textarea", { "aria-label": "Exam timetable to paste", style: "min-height:7rem", placeholder: "Maths Paper 1 | 14 May 2027 | GCSE | 9:00\nBiology | 21/05/2027 | Mock\nEnglish Literature, 3 June 2027", oninput: (e) => { planUI.paste = e.target.value; } }, planUI.paste),
+      h("button", { style: "margin-top:.6rem", onclick: importExams }, "Add these exams")));
+
+  const listCard = h("section", { class: "card" },
+    h("div", { class: "row space" }, h("h2", {}, `Your exams (${upcoming.length})`), past > 0 && h("button", { class: "ghost small", onclick: clearPastExams }, `Clear ${past} finished`)),
+    upcoming.length === 0 && h("p", { class: "muted" }, "No exams coming up yet."),
+    upcoming.map((e) => h("div", { class: "item" },
+      h("div", { class: "txt" },
+        h("div", {}, h("b", {}, e.subject), e.paper ? ` · ${e.paper}` : "", h("span", { class: "tag", style: "margin-left:.4rem" }, e.kind)),
+        h("div", { class: "small muted" }, `${longDate(e.date)}${e.time ? " · " + e.time : ""} · ${inDays(daysAway(e.date))}`),
+        h("div", { class: "row", style: "margin-top:.35rem;gap:.4rem" },
+          h("button", { class: "small", onclick: () => practise(e.subject) }, "Practise"),
+          h("button", { class: "small", onclick: () => makeQuestionsFor(e.subject, e.kind) }, "✨ Make past-paper style questions"))),
+      h("button", { class: "ghost small danger", "aria-label": `Delete exam: ${e.subject} ${e.date}`, onclick: () => deleteExam(e.id) }, "✕"))));
+
+  const setCard = h("section", { class: "card" },
+    h("h2", {}, "How much can you revise?"),
+    h("div", { class: "grid2" },
+      h("label", {}, "Sessions a day", h("select", { "aria-label": "Sessions a day", onchange: (e) => setPlan({ perDay: Number(e.target.value) }) }, [1, 2, 3, 4, 5, 6].map((n) => opt(n, String(n), state.plan.perDay)))),
+      h("label", {}, "Minutes each", h("select", { "aria-label": "Minutes each", onchange: (e) => setPlan({ minutes: Number(e.target.value) }) }, [15, 20, 25, 30, 45, 60, 90].map((n) => opt(n, `${n} min`, state.plan.minutes))))),
+    h("div", { class: "small muted", style: "margin:.4rem 0" }, "Rest days (no revision set):"),
+    h("div", { class: "row", style: "gap:.4rem" }, DAY_NAMES.map((n, i) => {
+      const off = state.plan.offDays.includes(i);
+      return h("button", { type: "button", class: "small" + (off ? " primary" : ""), "aria-pressed": off ? "true" : "false", onclick: () => setPlan({ offDays: off ? state.plan.offDays.filter((x) => x !== i) : [...state.plan.offDays, i].sort() }) }, n);
+    })));
+
+  const table = L.buildTimetable(state.exams, state.plan, t);
+  const shown = table.slice(0, planUI.shown);
+  const tableCard = h("section", { class: "card" },
+    h("h2", {}, "Your revision timetable"),
+    table.length === 0 && h("p", { class: "muted" }, "Add an exam above and your timetable will appear here."),
+    shown.map((d) => h("div", { style: "padding:.5rem 0;border-top:1px solid var(--border)" },
+      h("div", { class: "row space" }, h("b", {}, d.date === t ? `Today · ${longDate(d.date)}` : longDate(d.date)), d.off && h("span", { class: "tag" }, "😴 Rest day")),
+      d.exams.map((e) => h("div", { class: "banner", style: "margin:.35rem 0" }, `📝 EXAM: ${e.subject}${e.paper ? " " + e.paper : ""} (${e.kind})${e.time ? " at " + e.time : ""}`)),
+      d.sessions.map((x) => h("div", { class: "row space", style: "padding:.25rem 0" },
+        h("label", { class: "row", style: "gap:.5rem;margin:0;font-weight:400;flex:1 1 12rem" },
+          h("input", { type: "checkbox", style: "width:auto;min-height:0;margin:0", checked: !!state.plan.done[x.id], "aria-label": `Done: ${x.subject}`, onchange: () => toggleDone(x.id) }),
+          h("span", {}, h("b", {}, x.subject), h("span", { class: "muted small" }, `  ${x.minutes} min · ${x.phase}`))),
+        h("button", { class: "small", onclick: () => practise(x.subject) }, "Practise"))))),
+    table.length > shown.length && h("button", { style: "margin-top:.6rem", onclick: () => { planUI.shown += 14; render(); } }, `Show 14 more days (${table.length - shown.length} left)`),
+    table.length > 0 && h("p", { class: "small muted", style: "margin:.7rem 0 0" }, "Tick sessions off as you go. The plan updates by itself when you add or change exams."));
+
+  return h("div", {}, addCard, listCard, setCard, tableCard);
+}
+
 // ---------- navigation and page frame ----------
 function go(id) {
   if (id !== tab) lastChest = null;
@@ -276,7 +444,7 @@ function render() {
   let view;
   if (booting) view = h("p", { class: "muted" }, "Loading…");
   else if (!state) view = viewAuth();
-  else view = { home: viewHome, revise: viewRevise, questions: viewQuestions, rewards: viewRewards, farm: viewFarm }[tab]();
+  else view = { home: viewHome, revise: viewRevise, questions: viewQuestions, rewards: viewRewards, farm: viewFarm, plan: viewPlan }[tab]();
   app.replaceChildren(...[
     inApp && !storageOk && h("div", { class: "banner", role: "alert" }, "This browser isn't letting the app save on this device. " + (cloud.signedIn ? "Your account copy is still saved." : "Your progress will be lost when you close the page — try turning off private browsing.")),
     view,
@@ -354,6 +522,7 @@ function viewHome() {
       bar(Math.round((day.n / goal) * 100), "Today's goal"),
       h("p", { class: "small muted", style: "margin:.5rem 0 1rem" }, day.g || day.n >= goal ? "Goal reached! 🎉 Today's chest is yours." : `${goal - day.n} more to reach your daily goal and earn a chest 🎁.`),
       cta),
+    planHomeCard(),
     h("section", { class: "card" },
       h("h2", {}, "This week"),
       h("div", { class: "week" }, week.map((d) =>
@@ -452,7 +621,7 @@ function viewQuestion() {
     bar(Math.round((session.index / total) * 100), "Round progress"));
 
   const body = h("div", {},
-    h("div", { class: "row", style: "margin-top:.8rem" }, h("span", { class: "tag" }, subject ? subject.name : "Question"), item.retry && h("span", { class: "tag" }, "Second chance — no points")),
+    h("div", { class: "row", style: "margin-top:.8rem" }, h("span", { class: "tag" }, subject ? subject.name : "Question"), q.src && h("span", { class: "tag" }, `📄 ${q.src}`), item.retry && h("span", { class: "tag" }, "Second chance — no points")),
     h("p", { class: "quiz-q" }, q.q));
 
   if (session.stage === "ask") {
@@ -475,10 +644,18 @@ function viewQuestion() {
     const last = session.index >= total - 1 && !(!ok && !item.retry);
     const next = h("button", { class: "primary", onclick: () => commit(ok) }, last ? "Finish" : "Next →");
     body.append(h("div", { class: "row" }, next,
-      !ok && !session.dontKnow && !session.shown.options && session.given && h("button", { onclick: () => commit(true) }, "I was right ✔")));
+      !ok && !session.dontKnow && !session.shown.options && session.given && h("button", { onclick: () => { acceptMine(q); commit(true); } }, "I was right ✔")),
+      ...(!ok && !session.dontKnow && !session.shown.options && session.given ? [h("p", { class: "small muted", style: "margin:.5rem 0 0" }, "Pressing “I was right” counts it and remembers your wording for next time.")] : []));
     setTimeout(() => next.focus(), 0);
   }
   return h("section", { class: "card" }, head, body);
+}
+
+function acceptMine(q) {
+  const mine = String(session.given || "").trim();
+  if (!mine || L.isCorrect(mine, q.a)) return;
+  const next = `${q.a}; ${mine}`;
+  if (next.length <= 300 && !mine.includes(";")) { q.a = next; toast("Remembered — that wording will count next time ✓"); }
 }
 
 function check(given, dontKnow = false) {
@@ -587,7 +764,7 @@ function ensureSubject(fallbackName = "") {
   }
   return draft.subjectId;
 }
-const makeQuestion = (subjectId, q, a, choices = []) => ({ id: L.uid(), subjectId, q, a, choices, box: 1, due: today(), right: 0, wrong: 0 });
+const makeQuestion = (subjectId, q, a, choices = [], src = "") => ({ id: L.uid(), subjectId, q, a, choices, ...(src ? { src: String(src).slice(0, 80) } : {}), box: 1, due: today(), right: 0, wrong: 0 });
 
 function addQuestion() {
   const q = draft.q.trim();
@@ -633,7 +810,7 @@ async function makeWithAi() {
     for (let guard = 0; items.length < total && guard < 6; guard++) {
       if (total > 15) { draft.progress = `Writing… ${items.length} of ${total}`; render(); }
       const ask = Math.min(15, total - items.length);
-      const r = await cloud.generate({ topic, level: draft.level, count: ask, style: draft.style, avoid: items.slice(-30).map((x) => x.q) });
+      const r = await cloud.generate({ topic, level: draft.level, count: ask, style: draft.style, paper: draft.paper, board: draft.board, avoid: items.slice(-30).map((x) => x.q) });
       const got = (Array.isArray(r && r.questions) ? r.questions : []).filter((x) => x && x.q && x.a);
       let fresh = 0;
       for (const x of got) {
@@ -657,7 +834,7 @@ async function makeWithAi() {
   render();
 }
 async function copyPrompt() {
-  draft.prompt = L.buildAiPrompt({ topic: draft.topic, level: draft.level, count: wantedCount(), style: draft.style });
+  draft.prompt = L.buildAiPrompt({ topic: draft.topic, level: draft.level, count: wantedCount(), style: draft.style, paper: draft.paper, board: draft.board });
   let copied = false;
   try { await navigator.clipboard.writeText(draft.prompt); copied = true; } catch { copied = false; }
   toast(copied ? "Prompt copied — paste it into another AI ✓" : "Copy the prompt from the box below.");
@@ -668,7 +845,7 @@ function addPreview() {
   if (!keep.length) return toast("Tick at least one question to add.");
   const subjectId = ensureSubject(draft.topic);
   if (!subjectId) return;
-  for (const it of keep) state.questions.push(makeQuestion(subjectId, it.q, it.a, it.choices || []));
+  for (const it of keep) state.questions.push(makeQuestion(subjectId, it.q, it.a, it.choices || [], it.src || ""));
   state.stats.created += keep.length;
   draft.preview = null; draft.paste = ""; draft.prompt = "";
   checkBadges();
@@ -721,6 +898,16 @@ function viewQuestions() {
         oninput: (e) => { draft.count = e.target.value; }, onblur: (e) => { draft.count = String(wantedCount()); e.target.value = draft.count; } }),
         h("span", { class: "row", style: "gap:.35rem;margin-top:.35rem" }, [5, 10, 15, 25, 40].map((n) => h("button", { type: "button", class: "small" + (String(n) === String(draft.count) ? " primary" : ""), onclick: () => { draft.count = String(n); render(); } }, String(n))))),
       h("label", {}, "Style", h("select", { onchange: (e) => { draft.style = e.target.value; } }, [["mixed", "Mix of both"], ["typed", "Type the answer"], ["choice", "Multiple choice"]].map(([v, l]) => opt(v, l, draft.style))))),
+    h("label", { class: "row", style: "gap:.6rem;font-weight:600;margin:.3rem 0 .4rem" },
+      h("input", { type: "checkbox", style: "width:auto;min-height:0;margin:0", checked: draft.paper, onchange: (e) => { draft.paper = e.target.checked; render(); } }),
+      h("span", {}, "📄 Past-paper style questions")),
+    draft.paper && h("div", {},
+      h("label", {}, "Exam board", h("select", { onchange: (e) => { draft.board = e.target.value; render(); } }, L.BOARDS.map((x) => opt(x, x, draft.board)))),
+      h("p", { class: "small muted", style: "margin:0 0 .7rem" },
+        "Questions are written to match real exam papers (same topics, wording and command words) and are tagged “past-paper style”. Real papers are copyrighted and an AI can't reliably quote them, so for the genuine ones use the board's own site: ",
+        ...[["AQA", "https://www.aqa.org.uk/find-past-papers-and-mark-schemes"], ["Edexcel", "https://qualifications.pearson.com/en/support/support-topics/exams/past-papers.html"], ["OCR", "https://www.ocr.org.uk/qualifications/past-paper-finder/"], ["WJEC", "https://www.wjec.co.uk/students/past-papers/"]]
+          .flatMap(([n, u], i) => [i ? " · " : "", h("a", { href: u, target: "_blank", rel: "noopener noreferrer" }, n)]),
+        ". Paste any real question into “Add one question” or the list box below.")),
     draft.aiError && h("div", { class: "banner", role: "alert" }, draft.aiError),
     h("div", { class: "row" },
       cloud.enabled && h("button", { class: "primary", disabled: draft.busy, onclick: makeWithAi }, draft.busy ? (draft.progress || "Writing questions…") : "✨ Make questions for me"),
@@ -770,7 +957,7 @@ function viewQuestions() {
       shown.length === 0 && h("p", { class: "muted" }, state.questions.length ? "No questions match." : "No questions yet."),
       ...shown.slice(0, 150).map((q) => h("div", { class: "item" },
         h("div", { class: "txt" }, h("div", {}, q.q), h("div", { class: "a" }, `Answer: ${q.a}${q.choices.length ? "  ·  multiple choice" : ""}`),
-          h("div", { class: "small muted" }, `${names.get(q.subjectId) || ""} · box ${q.box}/5 · next ${q.due <= today() ? "now" : niceDate(q.due)}`)),
+          h("div", { class: "small muted" }, `${q.src ? "📄 " + q.src + " · " : ""}${names.get(q.subjectId) || ""} · box ${q.box}/5 · next ${q.due <= today() ? "now" : niceDate(q.due)}`)),
         h("button", { class: "ghost small danger", "aria-label": `Delete question: ${q.q}`, onclick: () => deleteQuestion(q.id) }, "✕"))),
       shown.length > 150 && h("p", { class: "muted small" }, `Showing the first 150 of ${shown.length}. Use the search box to narrow it down.`),
     ].filter(Boolean));

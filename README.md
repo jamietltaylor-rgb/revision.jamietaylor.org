@@ -36,3 +36,10 @@ Then redeploy (Deployments → the latest one → Retry, or make any small commi
 - Usernames are turned into private fake addresses (like `jamie@revise.invalid`). There is no email, so there is **no password reset**.
 - Supabase free projects can pause after about a week with no use. Open the project in the dashboard and press Restore if that happens.
 - Tests (optional, need Node 20+): `node --test tests/*.test.mjs` and `node tests/smoke.mjs`.
+
+## Exam timetable, past-paper style questions and answer checking
+
+- **Plan tab** – add mocks, GCSEs and A-levels (or paste a whole timetable) and the app builds a revision timetable. Sooner exams get more sessions, a subject is never set on its own exam day, and you can choose sessions per day, minutes each and rest days.
+- **Past-paper style questions** – tick the box in *Make questions on a topic* and pick an exam board. Questions are tagged "past-paper style". Real past papers are copyrighted and an AI can't quote them reliably, so for the genuine papers use the exam board's own website.
+- **Answers** – other correct wordings are accepted (number words, plurals, extra words, word order, small typos, the distinctive part of a name). If it still marks you wrong, "I was right ✔" counts it and remembers your wording.
+- Nothing new to set up in Supabase or Cloudflare.

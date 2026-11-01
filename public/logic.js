@@ -69,19 +69,92 @@ export function levenshtein(a, b) {
   return prev[b.length];
 }
 /** Several accepted answers can be written in one box, separated by ";" */
+const NUMBER_WORDS = {
+  zero: "0", one: "1", two: "2", three: "3", four: "4", five: "5", six: "6", seven: "7", eight: "8", nine: "9", ten: "10",
+  eleven: "11", twelve: "12", thirteen: "13", fourteen: "14", fifteen: "15", sixteen: "16", seventeen: "17", eighteen: "18",
+  nineteen: "19", twenty: "20", thirty: "30", forty: "40", fifty: "50", sixty: "60", seventy: "70", eighty: "80", ninety: "90",
+  hundred: "100", thousand: "1000", first: "1st", second: "2nd", third: "3rd",
+};
+const FILLER = new Set(["the", "a", "an", "and", "of", "it", "its", "is", "was", "are", "were", "be", "to", "that", "this", "i", "think", "answer", "called", "known", "as", "in", "by"]);
+// Words that don't identify an answer on their own ("Pacific" is enough for "Pacific Ocean").
+const GENERIC = new Set(["ocean", "sea", "river", "lake", "mount", "mountain", "city", "island", "war", "battle", "king", "queen", "republic", "kingdom", "county", "park", "road", "street", "empire", "dynasty", "treaty", "act", "party", "university", "bay", "desert", "forest", "valley", "canal", "bridge", "cathedral", "castle", "world", "great", "united", "state", "new"]);
+
+function stem(w) {
+  if (/^\d/.test(w) || w.length <= 3) return w;
+  if (w.endsWith("ies") && w.length > 4) return w.slice(0, -3) + "y";
+  if (/(ss|us|is|ous)$/.test(w)) return w;
+  if (/(ches|shes|xes|zes|ses)$/.test(w) && w.length > 4) return w.slice(0, -2);
+  if (w.endsWith("s")) return w.slice(0, -1);
+  return w;
+}
+function answerTokens(s, dropFiller = true) {
+  const all = basic(s).split(" ").filter(Boolean).map((w) => stem(NUMBER_WORDS[w] ?? w));
+  const kept = dropFiller ? all.filter((w) => !FILLER.has(w)) : all;
+  return kept.length ? kept : all;
+}
+const isNumeric = (w) => /^\d/.test(w);
+function tokenMatch(e, g) {
+  if (e === g) return true;
+  if (isNumeric(e) || isNumeric(g)) return false;
+  const allowed = Math.min(e.length, g.length) >= 9 ? 2 : Math.min(e.length, g.length) >= 5 ? 1 : 0;
+  return allowed > 0 && Math.abs(e.length - g.length) <= allowed && levenshtein(e, g) <= allowed;
+}
+/** Matches every expected word against the words given. Returns the spare given-words and unmatched expected-words, or null if nothing matched. */
+function alignTokens(exp, giv) {
+  const free = giv.map((_, i) => i);
+  const missing = [];
+  for (const e of exp) {
+    const at = free.findIndex((i) => tokenMatch(e, giv[i]));
+    if (at === -1) missing.push(e); else free.splice(at, 1);
+  }
+  return { missing, spare: free.map((i) => giv[i]), matched: exp.length - missing.length };
+}
+
 export function acceptedAnswers(expected) {
   return String(expected ?? "").split(";").map((s) => s.trim()).filter(Boolean);
 }
+
+/**
+ * Is `given` a correct answer? Forgiving about: capitals, punctuation, accents, "the/a/an", plurals,
+ * small typos in longer words, numbers written as words (seven = 7), word order, extra words around
+ * the answer ("it is the mitochondria"), and the distinctive part of a name ("Pacific" for "Pacific Ocean").
+ * Strict about: different numbers, hedging ("7 or 8") and denying the answer ("not Paris").
+ */
 export function isCorrect(given, expected) {
   const g = normalise(given);
   if (!g) return false;
+  const rawGiven = String(given ?? "").toLowerCase();
   return acceptedAnswers(expected).some((alt) => {
     const e = normalise(alt);
     if (!e) return false;
     if (g === e) return true;
-    if (/^[\d\s]+$/.test(e)) return false; // numbers must match exactly
-    const allowed = e.length >= 9 ? 2 : e.length >= 5 ? 1 : 0; // forgive small typos in longer answers
-    return allowed > 0 && Math.abs(g.length - e.length) <= allowed && levenshtein(g, e) <= allowed;
+    const rawAlt = alt.toLowerCase();
+
+    // typo in a single long phrase (e.g. run-together words)
+    if (!/^[\d\s]+$/.test(e)) {
+      const allowed = e.length >= 9 ? 2 : e.length >= 5 ? 1 : 0;
+      if (allowed > 0 && Math.abs(g.length - e.length) <= allowed && levenshtein(g, e) <= allowed) return true;
+    } else if (/^[\d\s]+$/.test(g)) return false; // two different numbers are never "close"
+
+    const exp = answerTokens(alt);
+    const giv = answerTokens(given);
+    if (!exp.length || !giv.length) return false;
+    const denies = /\b(not|no|never|neither|nor|without|except)\b|n['’]t\b/.test(rawGiven) && !/\b(not|no|never|neither|nor|without|except)\b|n['’]t\b/.test(rawAlt);
+    const hedges = /\b(or|maybe|perhaps|either|probably|guess)\b/.test(rawGiven) && !/\b(or|maybe|perhaps|either)\b/.test(rawAlt);
+    if (denies || hedges) return false;
+
+    const { missing, spare, matched } = alignTokens(exp, giv);
+    if (missing.length === 0) {
+      // everything expected is there; allow a few harmless extra words, but not extra numbers or a second answer
+      if (spare.length > 4) return false;
+      if (exp.some(isNumeric) && spare.some(isNumeric)) return false;
+      return true;
+    }
+    // the distinctive part of a longer name is enough: "Pacific" for "Pacific Ocean", "Severn" for "River Severn"
+    if (exp.length >= 2 && spare.length === 0 && missing.every((w) => GENERIC.has(w))) {
+      return exp.some((w) => !isNumeric(w) && !GENERIC.has(w) && w.length >= 4) && matched >= 1;
+    }
+    return false;
   });
 }
 
@@ -213,13 +286,29 @@ function splitCsv(line) {
   return out;
 }
 
-function toItem(parts) {
+function mergeAnswers(a, alts) {
+  let out = a;
+  const seen = new Set(acceptedAnswers(a).map(normalise));
+  for (const x of alts) {
+    const c = clean(x);
+    if (!c || c.includes(";")) continue;
+    const k = normalise(c);
+    if (!k || seen.has(k)) continue;
+    if ((out + "; " + c).length > 300) break;
+    out += "; " + c;
+    seen.add(k);
+  }
+  return out;
+}
+
+function toItem(parts, alts = [], src = "") {
   const cells = parts.map(clean);
   const q = cells[0];
   const a = cells[1];
   if (!q || !a) return null;
   const choices = [...new Set(cells.slice(2).filter(Boolean))].filter((c) => normalise(c) !== normalise(a)).slice(0, 5);
-  return { q: q.slice(0, 500), a: a.slice(0, 300), choices: choices.map((c) => c.slice(0, 200)) };
+  const source = clean(src).slice(0, 80);
+  return { q: q.slice(0, 500), a: mergeAnswers(a.slice(0, 300), alts), choices: choices.map((c) => c.slice(0, 200)), ...(source ? { src: source } : {}) };
 }
 
 function fromJson(text) {
@@ -236,7 +325,9 @@ function fromJson(text) {
       const q = row.q ?? row.question ?? row.front ?? row.prompt;
       const a = row.a ?? row.answer ?? row.back;
       const wrong = row.wrong ?? row.choices ?? row.options ?? row.distractors ?? [];
-      item = toItem([q, a, ...(Array.isArray(wrong) ? wrong : [])]);
+      let alts = row.alt ?? row.alts ?? row.alternatives ?? row.also ?? row.accept ?? [];
+      if (typeof alts === "string") alts = alts.split(/\s*[;|]\s*/);
+      item = toItem([q, a, ...(Array.isArray(wrong) ? wrong : [])], Array.isArray(alts) ? alts : [], typeof (row.src ?? row.source) === "string" ? (row.src ?? row.source) : "");
     }
     if (item) items.push(item); else skipped++;
   }
@@ -325,7 +416,9 @@ export const LEVELS = ["Primary school", "Years 7–9 (KS3)", "GCSE", "A-level",
 export const STYLES = { typed: "typed answers", choice: "multiple choice", mixed: "a mix of typed and multiple choice" };
 
 /** The text people copy into another AI (ChatGPT, Gemini…) to get questions this app can read. */
-export function buildAiPrompt({ topic, level = "GCSE", count = 15, style = "mixed" } = {}) {
+export const BOARDS = ["Any exam board", "AQA", "Edexcel", "OCR", "WJEC / Eduqas", "CCEA", "SQA"];
+
+export function buildAiPrompt({ topic, level = "GCSE", count = 15, style = "mixed", paper = false, board = "" } = {}) {
   const t = clean(topic).slice(0, 120) || "[type your topic here]";
   const n = Math.max(1, Math.min(50, Math.round(Number(count)) || 15));
   const styleLine = {
@@ -343,7 +436,15 @@ Rules:
 - One line per question. No numbering, headings, bullet points, bold text or intro/outro text.
 - Keep every answer short (1–6 words) so it can be typed, and make sure it is factually correct.
 - Don't use the "|" character inside a question or answer.
-- Cover a range of subtopics and don't repeat questions.`;
+- If an answer could correctly be worded another way (a synonym, abbreviation or alternative), add the alternatives to the answer separated by semicolons, like  CO2; carbon dioxide
+- Cover a range of subtopics and don't repeat questions.${paperLines(paper, board, level)}`;
+}
+function paperLines(paper, board, level) {
+  if (!paper) return "";
+  const b = BOARDS.includes(board) && board !== "Any exam board" ? board : "the main UK exam boards";
+  return `
+- Write them like real exam past-paper questions for ${b} at ${clean(level) || "GCSE"} level: the same topics, wording and command words (state, name, describe, explain, calculate, give one reason) that real papers use, turned into questions with a short answer that can be checked.
+- If you can see or reliably remember genuine past-paper questions on this topic, base the questions on them. Never make up a past-paper reference, and do not claim a question is from a real paper unless you are certain.`;
 }
 
 // ---------- chests (a surprise reward for reaching your daily goal) ----------
@@ -483,6 +584,8 @@ export function emptyState() {
     owned: [],
     equipped: { palette: "", font: "", hat: "" },
     claims: {},
+    exams: [],
+    plan: { perDay: 2, minutes: 30, offDays: [], done: {} },
     stats: {
       points: 0, spent: 0, answered: 0, correct: 0, streak: 0, bestStreak: 0, lastDay: "",
       perfectRounds: 0, goalDays: 0, created: 0, chestsOpened: 0, questsDone: 0, secrets: 0, days: {}, badges: {},
@@ -490,6 +593,7 @@ export function emptyState() {
   };
 }
 
+const validDate = (d) => DATE_RE.test(d) && dateStr(new Date(`${d}T12:00:00`)) === d;
 const str = (v, max) => (typeof v === "string" ? v.trim().slice(0, max) : "");
 const num = (v, min, max, fallback) => (Number.isFinite(v) ? Math.min(max, Math.max(min, v)) : fallback);
 
@@ -522,6 +626,7 @@ export function sanitiseState(raw, catalogueIds = null) {
     out.questions.push({
       id, subjectId, q: text, a: answer,
       choices: (Array.isArray(q.choices) ? q.choices : []).map((c) => str(c, 200)).filter(Boolean).slice(0, 5),
+      ...(str(q.src, 80) ? { src: str(q.src, 80) } : {}),
       box: Math.round(num(q.box, 1, MAX_BOX, 1)),
       due: typeof q.due === "string" && DATE_RE.test(q.due) ? q.due : "1970-01-01",
       right: Math.round(num(q.right, 0, 1e6, 0)),
@@ -559,6 +664,24 @@ export function sanitiseState(raw, catalogueIds = null) {
     }
   }
 
+  const examIds = new Set();
+  for (const e of (Array.isArray(raw.exams) ? raw.exams : []).slice(0, 150)) {
+    const id = str(e && e.id, 40);
+    const subject = str(e && e.subject, 60);
+    if (!id || !subject || examIds.has(id) || typeof e.date !== "string" || !validDate(e.date)) continue;
+    examIds.add(id);
+    out.exams.push({ id, subject, kind: KINDS.includes(e.kind) ? e.kind : "Other", date: e.date, paper: str(e.paper, 40), time: str(e.time, 20) });
+  }
+  const pl = raw.plan && typeof raw.plan === "object" ? raw.plan : {};
+  out.plan.perDay = Math.round(num(pl.perDay, 1, 6, 2));
+  out.plan.minutes = Math.round(num(pl.minutes, 10, 180, 30));
+  out.plan.offDays = [...new Set((Array.isArray(pl.offDays) ? pl.offDays : []).map(Number).filter((n) => Number.isInteger(n) && n >= 0 && n <= 6))].sort();
+  if (pl.done && typeof pl.done === "object") {
+    for (const k of Object.keys(pl.done).filter((k) => /^\d{4}-\d{2}-\d{2}\|[^|]{1,60}\|\d$/.test(k)).sort().slice(-600)) {
+      if (pl.done[k] === true) out.plan.done[k] = true;
+    }
+  }
+
   const st = raw.stats && typeof raw.stats === "object" ? raw.stats : {};
   for (const k of ["points", "spent", "answered", "correct", "streak", "bestStreak", "perfectRounds", "goalDays", "created", "chestsOpened", "questsDone", "secrets"]) {
     out.stats[k] = Math.round(num(st[k], 0, 1e9, 0));
@@ -592,4 +715,127 @@ export function starterState(today) {
   add("How many continents are there?", "7; seven");
   add("What is the capital of Australia?", "Canberra", ["Sydney", "Melbourne", "Perth"]);
   return s;
+}
+
+
+// ---------- exam timetable and revision plan ----------
+export const KINDS = ["Mock", "GCSE", "A-level", "AS-level", "Other"];
+export const subjectKey = (name) => normalise(name) || basic(name);
+const MONTHS = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, sept: 9, oct: 10, nov: 11, dec: 12 };
+const ymd = (y, m, d) => {
+  const s = `${String(y).padStart(4, "0")}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+  return validDate(s) ? s : "";
+};
+
+/** Finds a date written the way people write them in the UK. Returns { date, rest } where rest is the text without the date. */
+export function findDate(text, today) {
+  const src = String(text ?? "");
+  const withYear = (m, d, y) => {
+    if (y) return ymd(y.length === 2 ? 2000 + Number(y) : Number(y), m, d);
+    const thisYear = Number(today.slice(0, 4));
+    const first = ymd(thisYear, m, d);
+    return first && first >= today ? first : ymd(thisYear + 1, m, d);
+  };
+  let m;
+  if ((m = src.match(/(\d{4})-(\d{1,2})-(\d{1,2})/))) { const date = ymd(Number(m[1]), Number(m[2]), Number(m[3])); if (date) return { date, rest: src.replace(m[0], " ") }; }
+  if ((m = src.match(/\b(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{4}|\d{2})\b/))) { const date = withYear(Number(m[2]), Number(m[1]), m[3]); if (date) return { date, rest: src.replace(m[0], " ") }; }
+  if ((m = src.match(/\b(\d{1,2})(?:st|nd|rd|th)?\s+(?:of\s+)?([A-Za-z]{3,9})\.?(?:,?\s+(\d{4}))?/)) && MONTHS[m[2].slice(0, m[2].toLowerCase().startsWith("sept") ? 4 : 3).toLowerCase()]) {
+    const date = withYear(MONTHS[m[2].slice(0, m[2].toLowerCase().startsWith("sept") ? 4 : 3).toLowerCase()], Number(m[1]), m[3]);
+    if (date) return { date, rest: src.replace(m[0], " ") };
+  }
+  if ((m = src.match(/\b([A-Za-z]{3,9})\.?\s+(\d{1,2})(?:st|nd|rd|th)?(?:,?\s+(\d{4}))?\b/)) && MONTHS[m[1].slice(0, m[1].toLowerCase().startsWith("sept") ? 4 : 3).toLowerCase()]) {
+    const date = withYear(MONTHS[m[1].slice(0, m[1].toLowerCase().startsWith("sept") ? 4 : 3).toLowerCase()], Number(m[2]), m[3]);
+    if (date) return { date, rest: src.replace(m[0], " ") };
+  }
+  return { date: "", rest: src };
+}
+
+const PAPER_RE = /\b(paper\s*\d+[a-z]?|unit\s*\d+[a-z]?|component\s*\d+|p\d\b)/i;
+const TIME_RE = /\b(\d{1,2}[:.]\d{2}\s*(?:am|pm)?|\d{1,2}\s*(?:am|pm))\b/i;
+
+/**
+ * Reads a pasted exam timetable, one exam per line, e.g.
+ *   Maths Paper 1 | 14 May 2027 | GCSE | 9:00
+ *   Biology, 21/05/2027, mock
+ */
+export function parseExamList(text, today) {
+  const exams = [];
+  let skipped = 0;
+  for (const raw of String(text ?? "").split(/\r?\n/).slice(0, 300)) {
+    const line = raw.trim();
+    if (!line || /^[|\s:-]+$/.test(line)) continue;
+    const { date, rest } = findDate(line, today);
+    if (!date) { skipped++; continue; }
+    let remaining = rest.replace(/^\||\|$/g, " ");
+    let time = "";
+    const tm = remaining.match(TIME_RE);
+    if (tm) { time = tm[1].replace(/\s+/g, "").replace(".", ":"); remaining = remaining.replace(tm[0], " "); }
+    const parts = remaining.split(/\||\t|;|\s[–—-]\s|,/).map((p) => clean(p)).filter(Boolean);
+    let kind = "Other";
+    const kept = [];
+    for (const p of parts) {
+      const k = /^(mock|gcse|a[\s-]?level|as[\s-]?level|other)s?(\s+exams?)?$/i.exec(p);
+      if (k) { const w = k[1].toLowerCase().replace(/[\s-]/g, ""); kind = w === "mock" ? "Mock" : w === "gcse" ? "GCSE" : w === "alevel" ? "A-level" : w === "aslevel" ? "AS-level" : "Other"; }
+      else kept.push(p);
+    }
+    let subject = kept[0] || "";
+    let paper = "";
+    const pm = subject.match(PAPER_RE) || kept.slice(1).join(" ").match(PAPER_RE);
+    if (pm) { paper = pm[1].replace(/\s+/g, " "); subject = subject.replace(pm[0], " "); }
+    subject = clean(subject.replace(/\b(mock|gcse|a[\s-]?level|as[\s-]?level)\b/gi, " ").replace(/^[-:]+|[-:]+$/g, "")).slice(0, 60);
+    if (!subject) { skipped++; continue; }
+    exams.push({ subject, kind, date, paper: paper.slice(0, 40), time: time.slice(0, 20) });
+  }
+  return { exams: exams.slice(0, 150), skipped };
+}
+
+export const phaseFor = (daysLeft) => (daysLeft <= 3 ? "Final push" : daysLeft <= 14 ? "Practise" : "Learn it");
+
+/**
+ * Spreads revision over the days before each exam. Subjects with sooner exams get more sessions, no subject is
+ * set on its own exam day, days off are left empty, and subjects take turns so none is forgotten.
+ * Returns [{ date, weekday, off, exams, sessions: [{ subject, key, daysLeft, phase, minutes, id }] }].
+ */
+export function buildTimetable(exams, plan, today, maxDays = 60) {
+  const coming = exams.filter((e) => e.date >= today);
+  if (!coming.length) return [];
+  const last = coming.reduce((m, e) => (e.date > m ? e.date : m), today);
+  const span = Math.min(maxDays, daysBetween(today, last) + 1);
+  const subjects = new Map();
+  for (const e of coming) {
+    const key = subjectKey(e.subject);
+    if (!subjects.has(key)) subjects.set(key, { key, name: e.subject, dates: [] });
+    subjects.get(key).dates.push(e.date);
+  }
+  const perDay = Math.max(1, Math.min(6, Math.round(Number(plan && plan.perDay)) || 2));
+  const minutes = Math.max(10, Math.min(180, Math.round(Number(plan && plan.minutes)) || 30));
+  const off = new Set((plan && plan.offDays) || []);
+  const load = new Map();
+  const days = [];
+  for (let i = 0; i < span; i++) {
+    const date = addDays(today, i);
+    const dayExams = coming.filter((e) => e.date === date);
+    const isOff = off.has(weekday(date));
+    const sessions = [];
+    if (!isOff) {
+      const slots = dayExams.length ? 1 : perDay; // exam days stay light
+      for (let slot = 0; slot < slots; slot++) {
+        let best = null;
+        for (const sub of subjects.values()) {
+          const next = sub.dates.filter((d) => d > date).sort()[0];
+          if (!next) continue;
+          const left = daysBetween(date, next);
+          const already = sessions.some((x) => x.key === sub.key);
+          // share sessions in proportion to urgency: each session a subject already has makes the next one less likely
+          const score = (1 / (left + 2)) / ((load.get(sub.key) || 0) + 1) * (left <= 3 ? 1.5 : 1) * (already ? 0.5 : 1);
+          if (!best || score > best.score + 1e-9 || (Math.abs(score - best.score) <= 1e-9 && (left < best.left || (left === best.left && sub.name < best.sub.name)))) best = { sub, left, score };
+        }
+        if (!best) break;
+        load.set(best.sub.key, (load.get(best.sub.key) || 0) + 1);
+        sessions.push({ subject: best.sub.name, key: best.sub.key, daysLeft: best.left, phase: phaseFor(best.left), minutes, id: `${date}|${best.sub.key.slice(0, 50)}|${slot}` });
+      }
+    }
+    days.push({ date, weekday: weekday(date), off: isOff, exams: dayExams, sessions });
+  }
+  return days;
 }
