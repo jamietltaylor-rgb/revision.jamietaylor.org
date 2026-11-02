@@ -253,7 +253,7 @@ function checkBadges() {
 }
 
 // ======================= PLAN (calendar of exams + revision timetable) =======================
-const planUI = { month: "", selected: "", subject: "", board: "Any exam board", kind: "GCSE", paper: "", time: "", paste: "", preview: null, shown: 14 };
+const planUI = { month: "", selected: "", subject: "", board: "Any exam board", kind: "GCSE", paper: "", time: "", paste: "", preview: null, pasteOpen: false, prompt: "", shown: 14 };
 const DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const longDate = (date) => new Date(`${date}T12:00:00`).toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" });
 const monthTitle = (m) => new Date(`${m}-01T12:00:00`).toLocaleDateString("en-GB", { month: "long", year: "numeric" });
@@ -290,12 +290,21 @@ function checkExams() {
   const r = L.parseExamList(planUI.paste, today());
   if (!r.exams.length) return toast("I couldn't find any dates in that. Try one exam per line, like:  Maths Paper 1 | 14 May 2027 | GCSE");
   const have = new Set(state.exams.map((e) => `${L.subjectKey(e.subject)}|${e.date}|${e.paper}`));
+  planUI.pasteOpen = true;
   planUI.preview = { skipped: r.skipped, items: r.exams.map((e) => {
     const k = `${L.subjectKey(e.subject)}|${e.date}|${e.paper}`;
     const note = have.has(k) ? "already in your list" : e.date < today() ? "date has passed" : "";
     have.add(k);
     return { ...e, note, keep: !note };
   }) };
+  render();
+}
+async function copyTimetablePrompt() {
+  planUI.pasteOpen = true;
+  planUI.prompt = L.buildTimetablePrompt(today());
+  let copied = false;
+  try { await navigator.clipboard.writeText(planUI.prompt); copied = true; } catch { copied = false; }
+  toast(copied ? "Prompt copied — paste it into another AI and attach your photo ✓" : "Copy the prompt from the box below.");
   render();
 }
 function confirmExams() {
@@ -490,11 +499,15 @@ function viewPlan() {
   // ----- list view, paste import -----
   const shown = table.slice(0, planUI.shown);
   const listCard = h("section", { class: "card" },
-    h("details", { open: !!planUI.preview },
+    h("details", { open: planUI.pasteOpen || !!planUI.preview, ontoggle: (e) => { planUI.pasteOpen = e.target.open; } },
       h("summary", { style: "cursor:pointer;font-weight:700" }, `Paste a whole timetable, or see everything as a list (${upcoming.length} exam${upcoming.length === 1 ? "" : "s"})`),
       h("p", { class: "muted small", style: "margin:.6rem 0" }, "One exam per line — subject, date, and optionally the exam board, type, paper and time. Dates like 14 May 2027, 14/05/2027 or 2027-05-14 all work."),
       h("textarea", { "aria-label": "Exam timetable to paste", style: "min-height:7rem", placeholder: "Maths Paper 1 | 14 May 2027 | GCSE | AQA | 9:00\nBiology | 21/05/2027 | Mock\nEnglish Literature, 3 June 2027", oninput: (e) => { planUI.paste = e.target.value; } }, planUI.paste),
-      h("button", { style: "margin:.6rem 0", onclick: checkExams }, "Check the list"),
+      h("div", { class: "row", style: "margin:.6rem 0" },
+        h("button", { onclick: checkExams }, "Check the list"),
+        h("button", { onclick: copyTimetablePrompt }, "📷 Copy a prompt to turn a photo into a list")),
+      planUI.prompt && h("label", { style: "margin-bottom:.8rem" }, "Give this to another AI along with your photo, then paste its reply above",
+        h("textarea", { readonly: true, style: "min-height:11rem", onfocus: (e) => e.target.select?.() }, planUI.prompt)),
       planUI.preview && h("div", { style: "border:1px solid var(--border);border-radius:12px;padding:.7rem;margin-bottom:1rem" },
         h("b", {}, `Check these before adding (${planUI.preview.items.length})`),
         h("p", { class: "small muted", style: "margin:.2rem 0 .4rem" }, "Untick anything you don't want in your timetable."),
@@ -1027,6 +1040,18 @@ function deleteQuestion(id) {
   save();
   render();
 }
+function clearSubjectQuestions(id) {
+  const s = state.subjects.find((x) => x.id === id);
+  if (!s) return;
+  const n = state.questions.filter((q) => q.subjectId === id).length;
+  if (!n) return toast("There are no questions in that topic.");
+  if (!confirm(`Erase all ${plural(n, "question")} in "${s.name}"? The topic stays, ready for new questions. This can't be undone.`)) return;
+  state.questions = state.questions.filter((q) => q.subjectId !== id);
+  session = null;
+  save();
+  toast(`Erased ${plural(n, "question")} from “${s.name}” ✓`);
+  render();
+}
 function deleteSubject(id) {
   const s = state.subjects.find((x) => x.id === id);
   if (!s) return;
@@ -1138,7 +1163,9 @@ function viewQuestions() {
   };
   const list = h("section", { class: "card" },
     h("div", { class: "row space" }, h("h2", {}, `Your questions (${state.questions.length})`),
-      draft.filter !== "all" && h("button", { class: "ghost small danger", onclick: () => deleteSubject(draft.filter) }, "Delete this subject")),
+      draft.filter !== "all" && h("span", { class: "row", style: "gap:.4rem" },
+        h("button", { class: "ghost small danger", onclick: () => clearSubjectQuestions(draft.filter) }, "Erase its questions"),
+        h("button", { class: "ghost small danger", onclick: () => deleteSubject(draft.filter) }, "Delete this subject"))),
     h("div", { class: "row" },
       h("select", { class: "grow", "aria-label": "Show subject", onchange: (e) => { draft.filter = e.target.value; render(); } },
         h("option", { value: "all", selected: draft.filter === "all" }, "All subjects"),
@@ -1163,7 +1190,9 @@ function viewQuestions() {
       const n = state.questions.filter((q) => q.subjectId === sub.id).length;
       return h("div", { class: "row space", style: "padding:.35rem 0;border-top:1px solid var(--border)" },
         h("span", {}, h("b", {}, sub.name), h("span", { class: "muted small" }, `  ·  ${plural(n, "question")}`)),
-        h("button", { class: "small danger", "aria-label": `Delete topic ${sub.name}`, onclick: () => deleteSubject(sub.id) }, "🗑 Delete topic"));
+        h("span", { class: "row", style: "gap:.4rem" },
+          h("button", { class: "small danger", disabled: n === 0, "aria-label": `Erase all questions in ${sub.name}`, onclick: () => clearSubjectQuestions(sub.id) }, "🧹 Erase questions"),
+          h("button", { class: "small danger", "aria-label": `Delete topic ${sub.name}`, onclick: () => deleteSubject(sub.id) }, "🗑 Delete topic")));
     }));
 
   return h("div", {}, subjectCard, makeCard, pasteCard, previewCard, oneCard, topicsCard, list, data);

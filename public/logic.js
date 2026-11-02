@@ -785,12 +785,13 @@ const TIME_RE = /\b(\d{1,2}[:.]\d{2}\s*(?:am|pm)?|\d{1,2}\s*(?:am|pm))\b/i;
 export function parseExamList(text, today) {
   const exams = [];
   let skipped = 0;
-  for (const raw of String(text ?? "").split(/\r?\n/).slice(0, 300)) {
-    const line = raw.trim();
+  const cleaned = String(text ?? "").replace(/^```[a-z]*\s*$/gim, "");
+  for (const raw of cleaned.split(/\r?\n/).slice(0, 300)) {
+    const line = stripNumber(raw.trim());
     if (!line || /^[|\s:-]+$/.test(line)) continue;
     const { date, rest } = findDate(line, today);
     if (!date) { skipped++; continue; }
-    let remaining = rest.replace(/^\||\|$/g, " ");
+    let remaining = rest.replace(/\b(mon|tue|tues|wed|thu|thur|thurs|fri|sat|sun)(?:day|sday|nesday|rsday|urday)?\b\.?/gi, " ").replace(/^\||\|$/g, " ");
     let time = "";
     const tm = remaining.match(TIME_RE);
     if (tm) { time = tm[1].replace(/\s+/g, "").replace(".", ":"); remaining = remaining.replace(tm[0], " "); }
@@ -888,4 +889,21 @@ export function markLocally(answer, scheme, marks) {
   });
   const total = Math.max(1, Math.min(12, Math.round(Number(marks)) || points.length || 1));
   return { awarded: Math.min(total, results.filter((r) => r.met).length), total, points: results };
+}
+
+/** The text people give to another AI, together with a photo of their exam timetable, to get a list this app can read. */
+export function buildTimetablePrompt(today) {
+  const year = String(today || dateStr()).slice(0, 4);
+  return `I'm attaching a photo of my exam timetable. Read it and turn it into a plain list with one exam per line, in exactly this format:
+
+Subject | date | type | exam board | paper | time
+
+Rules:
+- Write the date like 14 May ${year} (day, month name, year). Today is ${today || dateStr()}; if the photo has no year, use the next time that date comes round.
+- Type is Mock, GCSE, A-level or AS-level if you can tell from the photo, otherwise leave it out.
+- Exam board is AQA, Edexcel, OCR, WJEC, Eduqas, CCEA or SQA only if the photo says so, otherwise leave it out. Paper is something like Paper 1 or Component 2, and time is the start time. Leave out anything you can't see. Never guess.
+- Do not use the "|" character inside a subject name. Don't put the day of the week in.
+- If a subject has several exams (Paper 1, Paper 2…), write one line for each.
+- Only list actual exams. Skip breaks, lunches, registration and instructions.
+- Reply with ONLY the lines, no heading, no table, no numbering, no explanation.`;
 }
