@@ -128,7 +128,8 @@ async function playRound(w, { wrongFirst = false } = {}) {
   // exam calendar: paste a timetable, click a day, add an exam, subjects appear in Questions
   w.tab(5); w.say("Exam calendar"); w.say("Add an exam on this day");
   w.typeInto(w.byPlaceholder("Maths Paper 1 | 14 May 2027 | GCSE | AQA | 9:00\nBiology | 21/05/2027 | Mock\nEnglish Literature, 3 June 2027"), "Maths Paper 1 | 14 May 2027 | GCSE | AQA | 9:00\nBiology | 21/05/2027 | Mock\nEnglish Literature, 3 June 2027\nnonsense");
-  w.btn("📷 Copy a prompt to turn a photo into a list").click(); await w.flush(); w.say("Give this to another AI along with your photo");
+  w.say("Sign in to let the AI read a photo");
+  w.btn("Or copy a prompt to use with another AI").click(); await w.flush(); w.say("Give this to another AI along with your photo");
   assert.ok(all(w.app, (e) => String(e.tagName).toLowerCase() === "details").every((d) => d.attrs.open !== undefined), "the paste box stays open after pressing its buttons");
   w.btn("Check the list").click(); await w.flush(); w.say("Check these before adding (3)");
   const examBoxes = all(w.app, (e) => e.tagName === "INPUT" && e.attrs.type === "checkbox" && String(e.attrs["aria-label"] || "").startsWith("Add "));
@@ -162,7 +163,15 @@ async function playRound(w, { wrongFirst = false } = {}) {
   const checkCalls = [];
   let aiMode = "ok";
   let checkMode = "yes";
+  const photoCalls = [];
+  let photoReply = "Maths Paper 1 | 14 May 2027 | GCSE | AQA | 9:00\nBiology | 21 May 2027 | GCSE\nChemistry | 25 May 2027 | GCSE";
   const fetchFn = async (url, init) => {
+    if (String(url).startsWith("/api/timetable")) {
+      photoCalls.push(JSON.parse(init.body));
+      assert.ok(init.headers.Authorization.startsWith("Bearer "), "photo reading must carry the login token");
+      if (!photoReply) return new Response(JSON.stringify({ error: "I couldn't read any exams from that photo." }), { status: 502 });
+      return new Response(JSON.stringify({ text: photoReply }), { status: 200 });
+    }
     if (String(url).startsWith("/api/check")) {
       checkCalls.push(JSON.parse(init.body));
       assert.ok(init.headers.Authorization.startsWith("Bearer "), "AI check must carry the login token");
@@ -299,6 +308,30 @@ async function playRound(w, { wrongFirst = false } = {}) {
     const n = checkCalls.length; w.btn("Next →").click();
     checkMode = "yes"; inp = typedQuestion(); const q4 = all(w.app, (e) => e.className === "quiz-q")[0].textContent; inp.value = fake.rows.get(userId).data.questions.find((x) => x.q === q4).a.split(";")[0].trim(); fire(inp, "keydown", { key: "Enter" }); await w.flush();
     assert.equal(checkCalls.length, n, "an answer our own matching accepts never goes to the AI");
+  }
+
+  // a photo of a timetable: the AI reads it into the list, which then goes through the usual check/untick step
+  {
+    globalThis.FileReader = class { readAsDataURL(f) { setImmediate(() => { this.result = "data:image/png;base64,iVBORw0KGgo="; this.onload(); }); } };
+    globalThis.Image = class { set src(v) { setImmediate(() => { this.width = 3000; this.height = 2000; this.onload(); }); } };
+    w.tab(5);
+    w.say("Paste a whole timetable");
+    const pick = all(w.app, (e) => e.tagName === "INPUT" && e.attrs.type === "file")[0]; assert.ok(pick, "the photo picker is on the page");
+    pick.files = [{ type: "image/png", name: "timetable.png" }]; fire(pick, "change", { target: pick }); await w.flush();
+    assert.equal(photoCalls.length, 1); assert.ok(photoCalls[0].image.startsWith("data:image/png;base64,"), "sends the picture as a data URL"); assert.match(photoCalls[0].today, /^\d{4}-\d{2}-\d{2}$/);
+    w.say("Check these before adding (3)"); w.say("Maths"); w.say("Chemistry"); assert.ok(w.toastLog.join("|").includes("check the dates match"));
+    assert.ok(w.input((e) => e.attrs["aria-label"] === "Exam timetable to paste").textContent.includes("Biology"), "the text is also in the box so it can be edited");
+    const tick = all(w.app, (e) => e.tagName === "INPUT" && e.attrs.type === "checkbox" && (e.attrs["aria-label"] || "").startsWith("Add Chemistry"))[0]; tick.checked = false; fire(tick, "change", { target: tick });
+    w.btn("Add 2 exams").click(); await w.flush();
+    assert.deepEqual(fake.rows.get(userId).data.exams.map((x) => x.subject).sort(), ["Biology", "Maths"]);
+    // a photo that can't be read shows the reason and leaves everything as it was
+    photoReply = null; const pick2 = all(w.app, (e) => e.tagName === "INPUT" && e.attrs.type === "file")[0];
+    pick2.files = [{ type: "image/png", name: "blurry.png" }]; fire(pick2, "change", { target: pick2 }); await w.flush();
+    assert.ok(w.toastLog.join("|").includes("couldn't read any exams")); assert.equal(fake.rows.get(userId).data.exams.length, 2);
+    // not a picture at all
+    const pick3 = all(w.app, (e) => e.tagName === "INPUT" && e.attrs.type === "file")[0];
+    pick3.files = [{ type: "application/pdf", name: "x.pdf" }]; fire(pick3, "change", { target: pick3 }); await w.flush();
+    assert.equal(photoCalls.length, 2, "non-pictures are never uploaded"); assert.ok(w.toastLog.join("|").includes("isn't a picture"));
   }
 
   // a revoked session drops you back to the sign-in page without crashing

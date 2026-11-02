@@ -253,7 +253,7 @@ function checkBadges() {
 }
 
 // ======================= PLAN (calendar of exams + revision timetable) =======================
-const planUI = { month: "", selected: "", subject: "", board: "Any exam board", kind: "GCSE", paper: "", time: "", paste: "", preview: null, pasteOpen: false, prompt: "", shown: 14 };
+const planUI = { month: "", selected: "", subject: "", board: "Any exam board", kind: "GCSE", paper: "", time: "", paste: "", preview: null, pasteOpen: false, prompt: "", shown: 14, reading: false };
 const DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const longDate = (date) => new Date(`${date}T12:00:00`).toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" });
 const monthTitle = (m) => new Date(`${m}-01T12:00:00`).toLocaleDateString("en-GB", { month: "long", year: "numeric" });
@@ -288,7 +288,7 @@ function addExam(date) {
 }
 function checkExams() {
   const r = L.parseExamList(planUI.paste, today());
-  if (!r.exams.length) return toast("I couldn't find any dates in that. Try one exam per line, like:  Maths Paper 1 | 14 May 2027 | GCSE");
+  if (!r.exams.length) { toast("I couldn't find any dates in that. Try one exam per line, like:  Maths Paper 1 | 14 May 2027 | GCSE"); return false; }
   const have = new Set(state.exams.map((e) => `${L.subjectKey(e.subject)}|${e.date}|${e.paper}`));
   planUI.pasteOpen = true;
   planUI.preview = { skipped: r.skipped, items: r.exams.map((e) => {
@@ -297,6 +297,56 @@ function checkExams() {
     have.add(k);
     return { ...e, note, keep: !note };
   }) };
+  render();
+  return true;
+}
+/** Shrinks a photo so it uploads quickly and the AI can still read the small print. */
+function prepareImage(file) {
+  return new Promise((resolve, reject) => {
+    if (!/^image\//.test(String(file.type || ""))) return reject(new Error("That isn't a picture. Choose a photo or screenshot."));
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("I couldn't open that picture."));
+    reader.onload = () => {
+      const src = String(reader.result);
+      const img = new Image();
+      img.onerror = () => reject(new Error("I couldn't read that picture. Try a JPEG or PNG."));
+      img.onload = () => {
+        try {
+          const scale = Math.min(1, 1800 / Math.max(img.width, img.height, 1));
+          const canvas = document.createElement("canvas");
+          canvas.width = Math.max(1, Math.round(img.width * scale));
+          canvas.height = Math.max(1, Math.round(img.height * scale));
+          const ctx = canvas.getContext("2d");
+          ctx.fillStyle = "#fff";
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          resolve(canvas.toDataURL("image/jpeg", 0.85));
+        } catch {
+          if (src.length <= 3_500_000 && /^data:image\/(jpeg|png|webp);base64,/.test(src)) resolve(src);
+          else reject(new Error("That picture is too big. Try a smaller or cropped one."));
+        }
+      };
+      img.src = src;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+async function readTimetablePhoto(file) {
+  if (!file) return;
+  planUI.pasteOpen = true;
+  if (!cloud.signedIn) { toast("Sign in first — the AI needs your login to read a photo."); return render(); }
+  planUI.reading = true;
+  render();
+  try {
+    const image = await prepareImage(file);
+    const r = await cloud.readTimetable({ image, today: today() });
+    planUI.paste = r.text;
+    planUI.reading = false;
+    if (checkExams()) toast("Read your photo ✓ — check the dates match it before adding");
+  } catch (e) {
+    toast(e && e.message ? e.message : "I couldn't read that photo.");
+  }
+  planUI.reading = false;
   render();
 }
 async function copyTimetablePrompt() {
@@ -551,6 +601,8 @@ function viewPlan() {
 
   // ----- list view, paste import -----
   const shown = table.slice(0, planUI.shown);
+  const photoPick = h("input", { type: "file", accept: "image/*", "aria-label": "Photo of your exam timetable", style: "position:absolute;width:1px;height:1px;opacity:0;pointer-events:none", tabindex: "-1",
+    onchange: (e) => { const f = e.target.files && e.target.files[0]; e.target.value = ""; readTimetablePhoto(f); } });
   const listCard = h("section", { class: "card" },
     h("details", { open: planUI.pasteOpen || !!planUI.preview, ontoggle: (e) => { planUI.pasteOpen = e.target.open; } },
       h("summary", { style: "cursor:pointer;font-weight:700" }, `Paste a whole timetable, or see everything as a list (${upcoming.length} exam${upcoming.length === 1 ? "" : "s"})`),
@@ -558,7 +610,10 @@ function viewPlan() {
       h("textarea", { "aria-label": "Exam timetable to paste", style: "min-height:7rem", placeholder: "Maths Paper 1 | 14 May 2027 | GCSE | AQA | 9:00\nBiology | 21/05/2027 | Mock\nEnglish Literature, 3 June 2027", oninput: (e) => { planUI.paste = e.target.value; } }, planUI.paste),
       h("div", { class: "row", style: "margin:.6rem 0" },
         h("button", { onclick: checkExams }, "Check the list"),
-        h("button", { onclick: copyTimetablePrompt }, "📷 Copy a prompt to turn a photo into a list")),
+        h("button", { class: "primary", disabled: planUI.reading, onclick: () => photoPick.click() }, planUI.reading ? "⏳ Reading your photo…" : "📷 Read a photo of my timetable"),
+        photoPick),
+      h("p", { class: "small muted", style: "margin:0 0 .6rem" }, cloud.signedIn ? "Choose a clear photo or screenshot of your timetable and the AI will turn it into a list for you to check." : "Sign in to let the AI read a photo of your timetable for you."),
+      h("div", { class: "row", style: "margin:0 0 .6rem" }, h("button", { class: "ghost small", onclick: copyTimetablePrompt }, "Or copy a prompt to use with another AI")),
       planUI.prompt && h("label", { style: "margin-bottom:.8rem" }, "Give this to another AI along with your photo, then paste its reply above",
         h("textarea", { readonly: true, style: "min-height:11rem", onfocus: (e) => e.target.select?.() }, planUI.prompt)),
       planUI.preview && h("div", { style: "border:1px solid var(--border);border-radius:12px;padding:.7rem;margin-bottom:1rem" },
