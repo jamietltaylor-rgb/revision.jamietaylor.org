@@ -215,3 +215,12 @@ button[aria-pressed="true"] { cursor: default; }
   .cal-num { font-size: .9rem; }
   .cal-chip { font-size: .72rem; padding: 2px 5px; }
 }
+
+/* ===== In-app confirm box ===== */
+.modal-back { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; padding: 1rem; background: rgb(0 0 0 / 55%); }
+.modal { width: min(100%, 26rem); background: var(--card); color: var(--fg); border: 1px solid var(--border); border-radius: 16px; padding: 1.2rem 1.3rem; box-shadow: 0 20px 50px -12px rgb(0 0 0 / 60%); }
+.modal h2 { margin: 0 0 .5rem; }
+.modal p { margin: 0; color: var(--muted); }
+button.danger-solid { background: var(--bad); border-color: var(--bad); color: #fff; }
+button.danger-solid:hover:not(:disabled) { border-color: var(--bad); filter: brightness(1.1); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) button.danger-solid { color: #1a0505; } }

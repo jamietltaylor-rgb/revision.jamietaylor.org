@@ -380,6 +380,59 @@ function todaysPlan() {
   return day || { date: t, sessions: [], exams: [], off: false };
 }
 
+// ---------- "add to your home screen" help ----------
+const installUI = { open: false, event: null };
+if (typeof window !== "undefined" && window.addEventListener) {
+  window.addEventListener("beforeinstallprompt", (e) => { e.preventDefault(); installUI.event = e; if (tab === "home" && state && !session) render(); });
+  window.addEventListener("appinstalled", () => { installUI.event = null; if (tab === "home" && state) render(); });
+}
+const isInstalled = () => {
+  try { return Boolean((window.matchMedia && window.matchMedia("(display-mode: standalone)").matches) || (typeof navigator !== "undefined" && navigator.standalone)); } catch { return false; }
+};
+const myDevice = () => {
+  const ua = (typeof navigator !== "undefined" && navigator.userAgent) || "";
+  if (/iPhone|iPad|iPod/i.test(ua) || (/Macintosh/i.test(ua) && typeof navigator !== "undefined" && navigator.maxTouchPoints > 1)) return "apple";
+  if (/Android/i.test(ua)) return "android";
+  return "";
+};
+async function installNow() {
+  const ev = installUI.event;
+  if (!ev) return;
+  installUI.event = null;
+  try { await ev.prompt(); } catch { /* the browser said no */ }
+  render();
+}
+function installCard() {
+  if (isInstalled()) return null;
+  const site = (typeof location !== "undefined" && location.host) || "revision.jamietaylor.org";
+  const mine = myDevice();
+  const steps = (title, items, note) => h("div", { style: "margin:.7rem 0" },
+    h("h3", {}, title),
+    h("ol", { style: "margin:.3rem 0 .3rem 1.2rem;padding:0" }, items.map((x) => h("li", { style: "margin:.2rem 0" }, x))),
+    note && h("p", { class: "small muted", style: "margin:.2rem 0 0" }, note));
+  const apple = steps("🍎 iPhone or iPad", [
+    `Open ${site} in Safari.`,
+    "Tap the Share button (the square with an arrow pointing up) — at the bottom of the screen on an iPhone, or at the top on an iPad.",
+    "Scroll down the list and tap “Add to Home Screen”.",
+    "Tap “Add” in the top corner. The Revise icon now appears on your home screen.",
+  ], "If you don't see “Add to Home Screen”, you're probably not in Safari — open the link in Safari and try again.");
+  const android = steps("🤖 Android phone or tablet", [
+    `Open ${site} in Chrome.`,
+    "Tap the three dots in the top-right corner.",
+    "Tap “Install app” (or “Add to Home screen”).",
+    "Tap “Install” or “Add”, then confirm. The Revise icon appears on your home screen.",
+  ], "Using Samsung Internet? Tap the menu (three lines), then “Add page to”, then “Home screen”.");
+  const computer = steps("💻 Computer", [
+    "In Chrome or Edge, click the small install icon at the right-hand end of the address bar (or open the menu and choose “Install Revise”).",
+  ]);
+  return h("section", { class: "card" },
+    h("details", { open: installUI.open, ontoggle: (e) => { installUI.open = e.target.open; } },
+      h("summary", { style: "cursor:pointer;font-weight:700;font-size:1.05rem" }, "📲 Add Revise to your home screen"),
+      h("p", { class: "muted small", style: "margin:.5rem 0" }, "Put the icon on your phone's home screen so it opens like an app, full screen, with one tap."),
+      installUI.event && h("button", { class: "primary", style: "margin:.3rem 0", onclick: installNow }, "Install now"),
+      ...(mine === "android" ? [android, apple, computer] : mine === "apple" ? [apple, android, computer] : [apple, android, computer])));
+}
+
 function planHomeCard() {
   const t = today();
   const upcoming = state.exams.filter((e) => e.date >= t).sort((a, b) => a.date.localeCompare(b.date));
@@ -662,7 +715,8 @@ function viewHome() {
       })),
     earned.length > 0 && h("section", { class: "card" },
       h("div", { class: "row space" }, h("h2", {}, "Latest badges"), h("button", { class: "ghost small", onclick: () => go("rewards") }, "See all")),
-      h("div", { class: "badges" }, earned.map((b) => h("div", { class: "badge" }, h("span", { class: "ico", "aria-hidden": "true" }, b.icon), h("b", {}, b.name), h("span", { class: "small muted" }, niceDate(s.badges[b.id])))))));
+      h("div", { class: "badges" }, earned.map((b) => h("div", { class: "badge" }, h("span", { class: "ico", "aria-hidden": "true" }, b.icon), h("b", {}, b.name), h("span", { class: "small muted" }, niceDate(s.badges[b.id])))))),
+    installCard());
 }
 
 // ======================= REVISE =======================
@@ -1040,23 +1094,53 @@ function deleteQuestion(id) {
   save();
   render();
 }
-function clearSubjectQuestions(id) {
+/** An in-app "are you sure?" box (instead of the browser's pop-up). Resolves true if confirmed. */
+function askConfirm({ title, message, confirmLabel = "Yes", danger = true }) {
+  return new Promise((resolve) => {
+    const previous = document.activeElement;
+    let box;
+    const done = (value) => {
+      document.removeEventListener?.("keydown", onKey, true);
+      box.remove();
+      try { previous && previous.focus && previous.focus(); } catch { /* ignore */ }
+      resolve(value);
+    };
+    const cancel = h("button", { type: "button", onclick: () => done(false) }, "Cancel");
+    const ok = h("button", { type: "button", class: danger ? "danger-solid" : "primary", onclick: () => done(true) }, confirmLabel);
+    const onKey = (e) => {
+      if (e.key === "Escape") { e.preventDefault(); done(false); }
+      else if (e.key === "Tab") { e.preventDefault(); (document.activeElement === cancel ? ok : cancel).focus(); }
+    };
+    box = h("div", { class: "modal-back", onclick: (e) => { if (e.target === box) done(false); } },
+      h("div", { class: "modal", role: "alertdialog", "aria-modal": "true", "aria-labelledby": "modal-title", "aria-describedby": "modal-msg" },
+        h("h2", { id: "modal-title" }, title),
+        h("p", { id: "modal-msg" }, message),
+        h("div", { class: "row", style: "justify-content:flex-end;margin-top:1rem" }, cancel, ok)));
+    document.body.append(box);
+    document.addEventListener?.("keydown", onKey, true);
+    setTimeout(() => cancel.focus(), 0);
+  });
+}
+
+async function clearSubjectQuestions(id) {
   const s = state.subjects.find((x) => x.id === id);
   if (!s) return;
   const n = state.questions.filter((q) => q.subjectId === id).length;
   if (!n) return toast("There are no questions in that topic.");
-  if (!confirm(`Erase all ${plural(n, "question")} in "${s.name}"? The topic stays, ready for new questions. This can't be undone.`)) return;
+  if (!(await askConfirm({ title: `Erase the questions in “${s.name}”?`, message: `All ${plural(n, "question")} will be erased. The topic stays, ready for new questions. This can't be undone.`, confirmLabel: "Erase questions" }))) return;
+  if (!state.subjects.some((x) => x.id === id)) return;
   state.questions = state.questions.filter((q) => q.subjectId !== id);
   session = null;
   save();
   toast(`Erased ${plural(n, "question")} from “${s.name}” ✓`);
   render();
 }
-function deleteSubject(id) {
+async function deleteSubject(id) {
   const s = state.subjects.find((x) => x.id === id);
   if (!s) return;
   const n = state.questions.filter((q) => q.subjectId === id).length;
-  if (!confirm(`Delete "${s.name}" and its ${plural(n, "question")}? This can't be undone.`)) return;
+  if (!(await askConfirm({ title: `Delete “${s.name}”?`, message: `The topic and its ${plural(n, "question")} will be deleted. This can't be undone.`, confirmLabel: "Delete topic" }))) return;
+  if (!state.subjects.some((x) => x.id === id)) return;
   state.subjects = state.subjects.filter((x) => x.id !== id);
   state.questions = state.questions.filter((q) => q.subjectId !== id);
   draft.filter = "all";
@@ -1213,7 +1297,7 @@ async function importData(e) {
   if (!file) return;
   try {
     const next = L.sanitiseState(JSON.parse(await file.text()), CATALOGUE);
-    if (!confirm(`Replace everything with this backup (${plural(next.questions.length, "question")}, ${next.stats.points} points)?`)) return;
+    if (!(await askConfirm({ title: "Load this backup?", message: `Everything you have now will be replaced with the backup (${plural(next.questions.length, "question")}, ${next.stats.points} points).`, confirmLabel: "Replace everything" }))) return;
     state = next;
     session = null;
     save();
@@ -1224,8 +1308,8 @@ async function importData(e) {
     toast(err instanceof SyntaxError ? "That file couldn't be read." : err.message);
   }
 }
-function resetAll() {
-  if (!confirm("Erase all your questions, points, badges and unlocked items? This can't be undone.")) return;
+async function resetAll() {
+  if (!(await askConfirm({ title: "Erase everything?", message: "All your questions, points, badges and unlocked items will be erased. This can't be undone.", confirmLabel: "Erase everything" }))) return;
   state = L.emptyState();
   session = null;
   save();
