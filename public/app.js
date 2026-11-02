@@ -726,35 +726,56 @@ function viewRevise() {
   return viewQuestion();
 }
 
+let reviseMode = "quick"; // "quick" = short answers, "exam" = complete exam questions
+const ofMode = (mode) => state.questions.filter((q) => (mode === "exam") === Boolean(q.exam));
+
 function viewSetup() {
   const t = today();
   if (!state.questions.length) {
     return h("section", { class: "card" }, h("h1", {}, "Nothing to revise yet"), h("p", { class: "muted" }, "Add some questions first — it only takes a minute."),
       h("button", { class: "primary", onclick: () => go("questions") }, "Add questions"));
   }
-  const dueIn = (id) => state.questions.filter((q) => (id === "all" || q.subjectId === id) && q.due <= t).length;
+  const pool = ofMode(reviseMode);
+  const dueIn = (id, mode = reviseMode) => ofMode(mode).filter((q) => (id === "all" || q.subjectId === id) && q.due <= t).length;
+  const modeTab = (mode, label) => h("button", { type: "button", class: "mode-tab" + (reviseMode === mode ? " active" : ""), "aria-pressed": reviseMode === mode ? "true" : "false",
+    onclick: () => { reviseMode = mode; render(); } }, label, h("span", { class: "small" }, ` ${ofMode(mode).length ? dueIn("all", mode) + " due" : "none yet"}`));
+  const switcher = h("div", { class: "mode-tabs", role: "group", "aria-label": "Type of questions" },
+    modeTab("quick", "⚡ Quick questions"), modeTab("exam", "📝 Exam questions"));
+
+  if (!pool.length) {
+    return h("div", {}, h("section", { class: "card" }, switcher,
+      h("h2", { style: "margin-top:1rem" }, reviseMode === "exam" ? "No exam questions yet" : "No quick questions yet"),
+      h("p", { class: "muted" }, reviseMode === "exam"
+        ? "Exam questions are full questions with marks that the app marks for you. Make some in the Questions tab by choosing “Complete exam questions”."
+        : "Quick questions have short answers. Add some in the Questions tab."),
+      h("button", { class: "primary", onclick: () => { draft.mode = reviseMode; go("questions"); } }, "Go to Questions")));
+  }
   const subjectSel = h("select", { id: "subject" },
     h("option", { value: "all" }, `All subjects (${dueIn("all")} due)`),
-    state.subjects.map((s) => h("option", { value: s.id }, `${s.name} (${dueIn(s.id)} due)`)));
+    state.subjects.filter((s) => pool.some((q) => q.subjectId === s.id)).map((s) => h("option", { value: s.id }, `${s.name} (${dueIn(s.id)} due)`)));
   const lengthSel = h("select", { id: "length" },
-    h("option", { value: "10" }, "Normal — 10 questions"),
-    h("option", { value: "5" }, "Quick — 5 questions"),
-    h("option", { value: "20" }, "Long — 20 questions"),
+    reviseMode === "exam"
+      ? [h("option", { value: "5" }, "Normal — 5 questions"), h("option", { value: "3" }, "Quick — 3 questions"), h("option", { value: "10" }, "Long — 10 questions")]
+      : [h("option", { value: "10" }, "Normal — 10 questions"), h("option", { value: "5" }, "Quick — 5 questions"), h("option", { value: "20" }, "Long — 20 questions")],
     h("option", { value: "due" }, "Everything that's due today"),
     h("option", { value: "all" }, "Every question"));
   return h("section", { class: "card" },
-    h("h1", {}, "Start a round"),
-    h("p", { class: "muted" }, "Questions you're due to see come first, and the ones you find hardest come back more often."),
+    switcher,
+    h("h1", { style: "margin-top:1rem" }, reviseMode === "exam" ? "Exam questions" : "Start a round"),
+    h("p", { class: "muted" }, reviseMode === "exam"
+      ? "Full questions with marks. Write your answer and the app marks it against the mark scheme."
+      : "Questions you're due to see come first, and the ones you find hardest come back more often."),
     h("label", {}, "Subject", subjectSel),
     h("label", {}, "How many?", lengthSel),
-    h("button", { class: "primary big", onclick: () => startSession(subjectSel.value, lengthSel.value) }, "Start"));
+    h("button", { class: "primary big", onclick: () => startSession(subjectSel.value, lengthSel.value, reviseMode) }, "Start"));
 }
 
-function startSession(subjectId, length) {
+function startSession(subjectId, length, mode = null) {
   const t = today();
-  const dueCount = state.questions.filter((q) => (subjectId === "all" || q.subjectId === subjectId) && q.due <= t).length;
+  const pool = mode ? ofMode(mode) : state.questions;
+  const dueCount = pool.filter((q) => (subjectId === "all" || q.subjectId === subjectId) && q.due <= t).length;
   const count = length === "due" ? Math.max(dueCount, 1) : length === "all" ? Infinity : Number(length) || 10;
-  const { picked } = L.pickQuestions(state.questions, { subjectId, count, today: t });
+  const { picked } = L.pickQuestions(pool, { subjectId, count, today: t });
   if (!picked.length) return toast("There are no questions in that subject yet.");
   session = {
     queue: picked.map((q) => ({ id: q.id, retry: false })), index: 0, combo: 0, results: [], pointsEarned: 0, chests: 0,
@@ -1059,6 +1080,19 @@ async function makeWithAi() {
   }
   render();
 }
+async function checkMaker() {
+  try {
+    const res = await fetch(CONFIG.aiEndpoint || "/api/generate");
+    let info = null;
+    try { info = await res.json(); } catch { info = null; }
+    if (!info || typeof info.ok !== "boolean") return toast("Not installed: the functions folder hasn't been deployed. Check GitHub has functions/api/generate.js, then redeploy.");
+    if (!info.login) return toast("Almost: Cloudflare is missing the SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY variables.");
+    if (!info.ai) return toast("Almost: Cloudflare is missing the Workers AI binding named AI.");
+    toast(cloud.signedIn ? "The question maker is set up and ready ✓" : "The server side is ready ✓ — sign in to use it.");
+  } catch {
+    toast("Couldn't reach the server — check your internet connection.");
+  }
+}
 async function copyPrompt() {
   draft.prompt = L.buildAiPrompt({ topic: draft.topic, level: draft.level, count: wantedCount(), style: draft.style, paper: draft.paper, board: draft.board, mode: draft.mode });
   let copied = false;
@@ -1194,7 +1228,8 @@ function viewQuestions() {
     draft.aiError && h("div", { class: "banner", role: "alert" }, draft.aiError),
     h("div", { class: "row" },
       cloud.enabled && h("button", { class: "primary", disabled: draft.busy, onclick: makeWithAi }, draft.busy ? (draft.progress || "Writing questions…") : "✨ Make questions for me"),
-      h("button", { onclick: copyPrompt }, "Copy a prompt for another AI")),
+      h("button", { onclick: copyPrompt }, "Copy a prompt for another AI"),
+      cloud.enabled && h("button", { class: "ghost small", onclick: checkMaker }, "Check it's set up")),
     !cloud.enabled && h("p", { class: "small muted", style: "margin:.6rem 0 0" }, "Making questions inside the app needs sign-in to be switched on (see README). Until then, copy the prompt, paste it into another AI, and paste its answer below."),
     cloud.enabled && h("p", { class: "small muted", style: "margin:.6rem 0 0" }, "AI can make mistakes — check the answers against your notes before adding them."),
     draft.prompt && h("label", { style: "margin-top:.8rem" }, "Prompt to copy",

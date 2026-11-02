@@ -114,6 +114,11 @@ export async function onRequestPost({ request, env }) {
   return json(502, { error: `${lastError} Try again, or use "Copy a prompt for another AI".` });
 }
 
+// Visiting /api/generate in a browser shows what is and isn't set up (yes/no only — never any keys).
+export async function onRequestGet({ env }) {
+  return json(200, { ok: true, login: Boolean(env.SUPABASE_URL && env.SUPABASE_PUBLISHABLE_KEY), ai: Boolean(env.AI) });
+}
+
 export async function onRequest() {
   return json(405, { error: "Use POST." });
 }
