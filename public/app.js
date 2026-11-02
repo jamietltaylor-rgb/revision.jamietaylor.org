@@ -286,9 +286,9 @@ function addExam(date) {
   toast(created ? `Exam added ✓ — and “${subject}” is now a subject in Questions` : "Exam added ✓");
   render();
 }
-function checkExams() {
-  const r = L.parseExamList(planUI.paste, today());
-  if (!r.exams.length) { toast("I couldn't find any dates in that. Try one exam per line, like:  Maths Paper 1 | 14 May 2027 | GCSE"); return false; }
+/** Shows the "check these before adding" list for already-parsed exams. Returns false if there were none. */
+function showExamPreview(r) {
+  if (!r.exams.length) { toast("I couldn't find any dates in that. Try pasting the part of your timetable that lists the exams and their dates."); return false; }
   const have = new Set(state.exams.map((e) => `${L.subjectKey(e.subject)}|${e.date}|${e.paper}`));
   planUI.pasteOpen = true;
   planUI.preview = { skipped: r.skipped, items: r.exams.map((e) => {
@@ -299,6 +299,31 @@ function checkExams() {
   }) };
   render();
   return true;
+}
+/** Reads whatever was pasted. Tidy one-per-line lists are read on the spot; anything else goes to the AI. */
+async function checkExams() {
+  const local = L.parseExamList(planUI.paste, today());
+  const tidy = local.exams.length > 0 && local.skipped === 0;
+  if (tidy || !cloud.signedIn || planUI.paste.trim().length < 8) {
+    if (!tidy && !cloud.signedIn && planUI.paste.trim()) toast("Sign in and the AI can read any layout. For now I'll look for lines with a date.");
+    return showExamPreview(local);
+  }
+  planUI.reading = true;
+  planUI.pasteOpen = true;
+  render();
+  let ok = false;
+  try {
+    const r = await cloud.readTimetable({ text: planUI.paste, today: today() });
+    const fromAi = L.parseExamList(r.text, today());
+    ok = true;
+    planUI.reading = false;
+    if (fromAi.exams.length) { showExamPreview(fromAi); toast("Sorted it out ✓ — check the dates match your timetable before adding"); return true; }
+  } catch (e) {
+    toast(e && e.message ? `${e.message} Trying to read it without the AI…` : "The AI couldn't read that. Trying without it…");
+  }
+  planUI.reading = false;
+  if (ok) toast("The AI couldn't find any exams in that.");
+  return showExamPreview(local);
 }
 /** Shrinks a photo so it uploads quickly and the AI can still read the small print. */
 function prepareImage(file) {
@@ -347,7 +372,7 @@ async function readTimetablePhoto(file) {
     const r = await cloud.readTimetable({ image, today: today() });
     planUI.paste = r.text;
     planUI.reading = false;
-    if (checkExams()) toast("Read it ✓ — check the dates match your timetable before adding");
+    if (showExamPreview(L.parseExamList(planUI.paste, today()))) toast("Read it ✓ — check the dates match your timetable before adding");
   } catch (e) {
     toast(e && e.message ? e.message : "I couldn't read that photo.");
   }
@@ -611,10 +636,10 @@ function viewPlan() {
   const listCard = h("section", { class: "card" },
     h("details", { open: planUI.pasteOpen || !!planUI.preview, ontoggle: (e) => { planUI.pasteOpen = e.target.open; } },
       h("summary", { style: "cursor:pointer;font-weight:700" }, `Paste a whole timetable, or see everything as a list (${upcoming.length} exam${upcoming.length === 1 ? "" : "s"})`),
-      h("p", { class: "muted small", style: "margin:.6rem 0" }, "One exam per line — subject, date, and optionally the exam board, type, paper and time. Dates like 14 May 2027, 14/05/2027 or 2027-05-14 all work."),
+      h("p", { class: "muted small", style: "margin:.6rem 0" }, cloud.signedIn ? "Paste your timetable in any layout — copied from an email, a school website, a table or a PDF. The AI sorts it into exams and you check them before they're added." : "Paste one exam per line — subject, date, and optionally the exam board, type, paper and time. (Sign in and the AI can read any layout.) Dates like 14 May 2027, 14/05/2027 or 2027-05-14 all work."),
       h("textarea", { "aria-label": "Exam timetable to paste", style: "min-height:7rem", placeholder: "Maths Paper 1 | 14 May 2027 | GCSE | AQA | 9:00\nBiology | 21/05/2027 | Mock\nEnglish Literature, 3 June 2027", oninput: (e) => { planUI.paste = e.target.value; } }, planUI.paste),
       h("div", { class: "row", style: "margin:.6rem 0" },
-        h("button", { onclick: checkExams }, "Check the list"),
+        h("button", { disabled: planUI.reading, onclick: checkExams }, planUI.reading ? "⏳ Working it out…" : "Check the list"),
         h("button", { class: "primary", disabled: planUI.reading, onclick: () => photoPick.click() }, planUI.reading ? "⏳ Reading your timetable…" : "📷 Read a photo or PDF of my timetable"),
         photoPick),
       h("p", { class: "small muted", style: "margin:0 0 .6rem" }, cloud.signedIn ? "Choose a clear photo, screenshot or PDF of your timetable and the AI will turn it into a list for you to check." : "Sign in to let the AI read a photo or PDF of your timetable for you."),

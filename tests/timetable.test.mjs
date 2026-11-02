@@ -87,3 +87,18 @@ test("pdfPrompt turns the photo wording into text wording", () => {
   const p = pdfPrompt("I'm attaching a photo of my exam timetable. Read it and go.\n- if the photo has no year", "TEXT");
   assert.doesNotMatch(p, /photo/); assert.match(p, /TEXT/);
 });
+
+test("pasted text in any layout goes to the text model; empty or tiny pastes are refused", async () => {
+  stubAuth(); let seen = null;
+  const ai = { run: async (m, i) => { seen = { m, i }; return { response: "Maths Paper 1 | 12 January 2027 | Mock | | | 9:00" }; } };
+  const messy = "Hi Year 11! Your mocks:\nWeek 1 - Monday: Maths P1 (9am) / Tuesday: English Lang P1\nBring a calculator!";
+  const r = await call(post({ text: messy, today: "2026-11-02" }), env(ai));
+  assert.equal(r.status, 200); assert.equal(r.body.source, "text"); assert.match(r.body.text, /^Maths Paper 1/);
+  assert.match(seen.m, /llama-3\.3-70b/); assert.match(seen.i.messages[1].content, /Bring a calculator/); assert.match(seen.i.messages[1].content, /any layout/); assert.doesNotMatch(seen.i.messages[1].content, /photo/);
+  const never = env({ run: async () => assert.fail("no") });
+  assert.equal((await call(post({ text: "  hi " }), never)).status, 400);
+  assert.equal((await call(post({}), never)).status, 400);
+  assert.equal((await call(post("null"), never)).status, 400);
+  const long = await call(post({ text: "x ".repeat(20000) }), env({ run: async (m, i) => { assert.ok(i.messages[1].content.length < 14000); return { response: "A | 1 May 2027" }; } }));
+  assert.equal(long.status, 200);
+});

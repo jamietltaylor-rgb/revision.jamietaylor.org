@@ -339,6 +339,25 @@ async function playRound(w, { wrongFirst = false } = {}) {
     assert.equal(photoCalls.length, 3); assert.equal(photoCalls[2].image, "data:application/pdf;base64,JVBERi0xLjQK", "PDF sent with the right type"); w.say("Check these before adding (1)");
   }
 
+  // pasted text in any layout: the AI sorts it out; a tidy list is read on the spot; if the AI is down we still try
+  {
+    const box = () => w.input((e) => e.attrs["aria-label"] === "Exam timetable to paste");
+    const n0 = photoCalls.length;
+    photoReply = "Physics Paper 1 | 10 June 2027 | GCSE | | | 9:00\nHistory Paper 1 | 11 June 2027 | GCSE";
+    w.typeInto(box(), "Hi all! Here are the dates.\nWeek 1: Thursday 10th June - Physics P1 at 9. Friday: History paper 1.\nGood luck!");
+    w.btn("Check the list").click(); await w.flush();
+    assert.equal(photoCalls.length, n0 + 1, "messy text goes to the AI"); assert.match(photoCalls[n0].text, /Physics P1/); assert.equal(photoCalls[n0].image, undefined);
+    w.say("Check these before adding (2)"); w.say("Physics"); w.say("History");
+    w.btn("Cancel").click();
+    w.typeInto(box(), "Geography | 15 June 2027 | GCSE\nArt | 16 June 2027 | GCSE");
+    w.btn("Check the list").click(); await w.flush();
+    assert.equal(photoCalls.length, n0 + 1, "a tidy list never uses the AI"); w.say("Check these before adding (2)"); w.btn("Cancel").click();
+    photoReply = null; // AI can't help: fall back to the lines that have a date
+    w.typeInto(box(), "Intro line\nRE | 17 June 2027 | GCSE");
+    w.btn("Check the list").click(); await w.flush();
+    assert.equal(photoCalls.length, n0 + 2); w.say("Check these before adding (1)"); w.say("RE"); w.btn("Cancel").click();
+  }
+
   // a revoked session drops you back to the sign-in page without crashing
   fake.revokeAll(); fake.expireAll(); w.tab(2);
   w.typeInto(w.input((e) => e.attrs.id === "new-q"), "Another?"); w.typeInto(w.byPlaceholder("Mitochondria"), "Yes"); w.btn("Add question").click(); await w.flush();
