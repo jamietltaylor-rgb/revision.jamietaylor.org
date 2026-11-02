@@ -301,7 +301,248 @@ function mergeAnswers(a, alts) {
   return out;
 }
 
-function toItem(parts, alts = [], src = "", marks = 0) {
+
+// ---------- exam question formats: multiple choice and figures (graphs, charts, tables) ----------
+export const FIG_TYPES = ["table", "bar", "line", "scatter", "pie"];
+const FORMAT_RULES = [
+  [/\b(maths?|mathematics|statistics|algebra|geometry|trigonometry|calculus)\b/i, false, ["line", "scatter", "bar", "pie", "table"]],
+  [/\b(computer science|computing|ict|information technology)\b/i, true, ["table"]],
+  [/\b(biology|chemistry|physics|geology|astronomy|(combined|triple|applied|natural|environmental|earth|forensic)?\s*science)\b/i, true, ["table", "line", "bar", "scatter"]],
+  [/\bgeography\b/i, true, ["table", "bar", "line", "pie", "scatter"]],
+  [/\b(economics|business)\b/i, true, ["table", "line", "bar", "pie"]],
+  [/\bpsychology\b/i, true, ["table", "bar", "scatter"]],
+  [/\bsociology\b/i, true, ["table", "bar", "pie"]],
+  [/\b(pe|p\.e\.|physical education|sport)\b/i, true, ["table", "bar", "line"]],
+  [/\b(design (and|&) technology|d&t|food (technology|preparation)|engineering)\b/i, true, ["table"]],
+];
+/**
+ * Which special question types does the real exam for this subject usually have? Multiple choice and graphs/charts/tables
+ * are only offered for subjects whose papers really use them. Pass the subject name first, then (as a fallback) the topic.
+ */
+export function examFormats(...names) {
+  for (const n of names) {
+    const text = String(n ?? "");
+    if (!text.trim()) continue;
+    for (const [re, mc, figures] of FORMAT_RULES) if (re.test(text)) return { mc, figures: [...figures] };
+  }
+  return { mc: false, figures: [] };
+}
+
+const asNum = (v) => { const n = typeof v === "string" ? Number(v.replace(/,/g, "").trim()) : v; return typeof n === "number" && Number.isFinite(n) && Math.abs(n) < 1e9 ? Math.round(n * 1e6) / 1e6 : null; };
+const cellText = (v, n) => clean(typeof v === "number" ? String(v) : v).slice(0, n);
+function figType(t) {
+  const x = String(t ?? "").toLowerCase().replace(/[^a-z]/g, "");
+  if (x.includes("pie")) return "pie";
+  if (x.includes("scatter")) return "scatter";
+  if (x.includes("line")) return "line";
+  if (x.includes("bar") || x.includes("histogram") || x.includes("column")) return "bar";
+  if (x.includes("table")) return "table";
+  return "";
+}
+
+/** Checks and tidies a figure (table, bar/line chart, scatter graph or pie chart). Returns null if it isn't usable. */
+export function cleanFigure(fig, allowed = FIG_TYPES) {
+  if (!fig || typeof fig !== "object" || Array.isArray(fig)) return null;
+  const type = figType(fig.type);
+  if (!type || !allowed.includes(type)) return null;
+  const base = { type, title: cellText(fig.title, 80) };
+  const xLabel = cellText(fig.xLabel ?? fig.xlabel ?? fig.xAxis ?? fig.x_axis ?? fig.x_label, 40);
+  const yLabel = cellText(fig.yLabel ?? fig.ylabel ?? fig.yAxis ?? fig.y_axis ?? fig.y_label, 40);
+  if (type === "table") {
+    const head = (Array.isArray(fig.head ?? fig.headers ?? fig.columns) ? (fig.head ?? fig.headers ?? fig.columns) : []).map((c) => cellText(c, 30)).slice(0, 8);
+    const rows = (Array.isArray(fig.rows) ? fig.rows : []).filter(Array.isArray).slice(0, 15).map((r) => head.map((_, i) => cellText(r[i] ?? "", 30)));
+    if (head.length < 2 || head.some((c) => !c) || rows.length < 1 || rows.every((r) => r.every((c) => !c))) return null;
+    return { ...base, head, rows };
+  }
+  if (type === "scatter") {
+    const points = [];
+    for (const pt of Array.isArray(fig.points) ? fig.points : []) {
+      const x = asNum(Array.isArray(pt) ? pt[0] : pt && pt.x), y = asNum(Array.isArray(pt) ? pt[1] : pt && pt.y);
+      if (x === null || y === null) return null;
+      points.push([x, y]);
+    }
+    if (points.length < 3 || points.length > 40) return null;
+    return { ...base, xLabel, yLabel, points };
+  }
+  const labels = (Array.isArray(fig.labels ?? fig.categories ?? fig.x) ? (fig.labels ?? fig.categories ?? fig.x) : []).map((l) => cellText(l, 20));
+  if (type === "pie") {
+    const values = (Array.isArray(fig.values ?? fig.data) ? (fig.values ?? fig.data) : []).map(asNum);
+    if (labels.length < 2 || labels.length > 8 || values.length !== labels.length || values.some((v) => v === null || v <= 0) || labels.some((l) => !l)) return null;
+    return { ...base, labels, values };
+  }
+  // bar and line
+  let series = Array.isArray(fig.series) ? fig.series : (Array.isArray(fig.values ?? fig.data) ? [{ name: "", values: fig.values ?? fig.data }] : []);
+  series = series.slice(0, 3).map((sr) => ({ name: cellText(sr && sr.name, 30), values: (Array.isArray(sr && sr.values) ? sr.values : []).map(asNum) }));
+  if (labels.length < 2 || labels.length > 14 || labels.some((l) => !l) || !series.length || series.some((sr) => sr.values.length !== labels.length || sr.values.some((v) => v === null))) return null;
+  return { ...base, xLabel, yLabel, labels, series };
+}
+
+/** Checks and tidies the options of an exam multiple-choice question and finds which one is correct. Returns { opts, a } or null. */
+export function cleanOpts(opts, answer) {
+  if (!Array.isArray(opts)) return null;
+  const list = opts.map((o) => clean(o && typeof o === "object" ? (o.text ?? o.option ?? "") : o).replace(/^\(?[A-Ea-e][.):]\s+/, "").slice(0, 200));
+  if (list.length < 3 || list.length > 5 || list.some((o) => !o)) return null;
+  const keys = list.map((o) => normalise(o) || o.toLowerCase());
+  if (new Set(keys).size !== keys.length) return null;
+  const a = clean(answer);
+  let m = /^\(?([A-Ea-e])\)?[.:]?$/.exec(a) || /^\(?([A-Ea-e])[.):]\s+/.exec(a);
+  if (m) { const i = m[1].toUpperCase().charCodeAt(0) - 65; if (i < list.length) return { opts: list, a: list[i] }; }
+  const stripped = a.replace(/^\(?[A-Ea-e][.):]\s+/, "");
+  const i = keys.indexOf(normalise(stripped) || stripped.toLowerCase());
+  return i === -1 ? null : { opts: list, a: list[i] };
+}
+
+/** True when a written question points at a diagram, graph or table that isn't actually there. */
+export function refersToMissingFigure(q) {
+  const t = String(q ?? "");
+  return /\b(figure|fig\.?|table|graph|chart|diagram|map|photograph|photo|image|picture)\s*\d\b/i.test(t)
+    || /\b(shown|given|displayed|drawn|illustrated)\s+(above|below)\b/i.test(t)
+    || /\b(use|using|from|look at|refer to|study|complete)\s+(the|this)\s+(graph|table|chart|figure|diagram|map|photograph|picture|image)\b/i.test(t)
+    || /\b(the|this)\s+(diagram|photograph|picture|image)\s+(above|below|shows)\b/i.test(t);
+}
+
+/** Round-number axis for charts: { min, max, step, ticks }. */
+export function niceScale(min, max, count = 5) {
+  let lo = Number(min), hi = Number(max);
+  if (!Number.isFinite(lo) || !Number.isFinite(hi)) { lo = 0; hi = 1; }
+  if (lo === hi) { if (lo === 0) hi = 1; else { lo = Math.min(lo, 0); hi = Math.max(hi, 0); } }
+  const raw = (hi - lo) / Math.max(1, count);
+  const mag = 10 ** Math.floor(Math.log10(raw));
+  const n = raw / mag;
+  const step = (n <= 1 ? 1 : n <= 2 ? 2 : n <= 5 ? 5 : 10) * mag;
+  const nmin = Math.floor(lo / step + 1e-9) * step, nmax = Math.ceil(hi / step - 1e-9) * step;
+  const dp = Math.max(0, -Math.floor(Math.log10(step)));
+  const ticks = [];
+  for (let v = nmin, i = 0; v <= nmax + step / 2 && i < 50; v += step, i++) ticks.push(Number(v.toFixed(dp)));
+  return { min: Number(nmin.toFixed(dp)), max: Number(nmax.toFixed(dp)), step, ticks };
+}
+
+const esc = (v) => String(v).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const numFmt = (n) => String(Math.round(n * 1000) / 1000);
+const SERIES_COLOURS = ["var(--fig-1,#2563eb)", "var(--fig-2,#e11d48)", "var(--fig-3,#16a34a)"];
+const PIE_COLOURS = ["#2563eb", "#e11d48", "#16a34a", "#f59e0b", "#7c3aed", "#0891b2", "#db2777", "#65a30d"];
+const trunc = (t, n) => (t.length > n ? t.slice(0, n - 1) + "…" : t);
+
+/** A short text description of a figure, for screen readers. */
+export function figureAlt(fig) {
+  if (!fig) return "";
+  const name = { table: "Table", bar: "Bar chart", line: "Line graph", scatter: "Scatter graph", pie: "Pie chart" }[fig.type] || "Figure";
+  let data = "";
+  if (fig.type === "pie") data = fig.labels.map((l, i) => `${l} ${numFmt(fig.values[i])}`).join(", ");
+  else if (fig.type === "scatter") data = fig.points.map(([x, y]) => `(${numFmt(x)}, ${numFmt(y)})`).join(" ");
+  else if (fig.series) data = fig.series.map((sr) => `${sr.name ? sr.name + ": " : ""}${fig.labels.map((l, i) => `${l} ${numFmt(sr.values[i])}`).join(", ")}`).join(". ");
+  return `${name}${fig.title ? ": " + fig.title : ""}.${fig.xLabel ? " x-axis: " + fig.xLabel + "." : ""}${fig.yLabel ? " y-axis: " + fig.yLabel + "." : ""} ${data}`.slice(0, 600).trim();
+}
+
+/** Draws a bar chart, line graph, scatter graph or pie chart as SVG text (all text is escaped). Tables are drawn by the page. */
+export function figureSvg(fig) {
+  if (!fig || fig.type === "table") return "";
+  const W = 520, H = 320;
+  const out = [];
+  const title = fig.title ? `<text x="${W / 2}" y="18" text-anchor="middle" font-size="15" font-weight="700" fill="currentColor">${esc(trunc(fig.title, 70))}</text>` : "";
+  const open = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(figureAlt(fig))}" style="width:100%;height:auto;max-width:560px;color:inherit" font-family="system-ui,sans-serif">`;
+  out.push(title);
+
+  if (fig.type === "pie") {
+    const total = fig.values.reduce((a, b) => a + b, 0);
+    const cx = 150, cy = 175, r = 110;
+    let angle = -Math.PI / 2;
+    fig.values.forEach((v, i) => {
+      const frac = v / total;
+      const colour = PIE_COLOURS[i % PIE_COLOURS.length];
+      if (frac >= 0.9999) out.push(`<circle cx="${cx}" cy="${cy}" r="${r}" fill="${colour}"/>`);
+      else {
+        const a2 = angle + frac * 2 * Math.PI;
+        const x1 = cx + r * Math.cos(angle), y1 = cy + r * Math.sin(angle), x2 = cx + r * Math.cos(a2), y2 = cy + r * Math.sin(a2);
+        out.push(`<path d="M${cx} ${cy} L${x1.toFixed(2)} ${y1.toFixed(2)} A${r} ${r} 0 ${frac > 0.5 ? 1 : 0} 1 ${x2.toFixed(2)} ${y2.toFixed(2)} Z" fill="${colour}" stroke="#fff" stroke-width="1.5"/>`);
+        angle = a2;
+      }
+      out.push(`<rect x="300" y="${70 + i * 24}" width="12" height="12" rx="2" fill="${colour}"/><text x="320" y="${80 + i * 24}" font-size="14" fill="currentColor">${esc(trunc(fig.labels[i], 18))} — ${numFmt(Math.round((v / total) * 1000) / 10)}%</text>`);
+    });
+    return open + out.join("") + "</svg>";
+  }
+
+  const multi = fig.type !== "scatter" && fig.series.length > 1;
+  const rotate = fig.type !== "scatter" && fig.labels.length > 6;
+  const left = 64, right = W - 14;
+  const top = (fig.title ? 36 : 14) + (multi ? 20 : 0);
+  const bottom = H - (fig.xLabel ? 28 : 8) - (rotate ? 54 : 30);
+  const mid = (a, b) => (a + b) / 2;
+  const plotW = right - left, plotH = bottom - top;
+
+  let ys, xs = null, numericX = false;
+  if (fig.type === "scatter") {
+    const px = fig.points.map((q) => q[0]), py = fig.points.map((q) => q[1]);
+    const span = (arr) => { const lo = Math.min(...arr), hi = Math.max(...arr), pad = (hi - lo) * 0.06; return lo >= 0 && lo < hi * 0.6 ? niceScale(0, hi + pad) : niceScale(lo - pad, hi + pad); };
+    xs = span(px); ys = span(py);
+  } else {
+    const all = fig.series.flatMap((sr) => sr.values);
+    const lo = Math.min(...all), hi = Math.max(...all);
+    const yLo = lo >= 0 ? (fig.type === "bar" || lo < hi * 0.6 ? 0 : lo) : lo;
+    ys = niceScale(yLo, hi <= 0 ? 0 : hi);
+    const nums = fig.labels.map((l) => (l.trim() !== "" ? Number(l) : NaN));
+    if (fig.type === "line" && nums.every(Number.isFinite) && new Set(nums).size === nums.length) { const lo = Math.min(...nums), hi = Math.max(...nums); numericX = true; xs = niceScale(lo >= 0 && lo < hi * 0.6 ? 0 : lo, hi); }
+  }
+  const Y = (v) => bottom - ((v - ys.min) / (ys.max - ys.min || 1)) * plotH;
+  const Xn = (v) => left + ((v - xs.min) / (xs.max - xs.min || 1)) * plotW;
+  const slot = plotW / (fig.labels ? fig.labels.length : 1);
+  const Xc = (i) => left + slot * (i + 0.5);
+
+  // gridlines and y axis
+  for (const t of ys.ticks) {
+    out.push(`<line x1="${left}" x2="${right}" y1="${Y(t).toFixed(1)}" y2="${Y(t).toFixed(1)}" stroke="currentColor" stroke-opacity=".14"/>`);
+    out.push(`<text x="${left - 6}" y="${(Y(t) + 4).toFixed(1)}" text-anchor="end" font-size="13" fill="currentColor">${numFmt(t)}</text>`);
+  }
+  out.push(`<line x1="${left}" x2="${left}" y1="${top}" y2="${bottom}" stroke="currentColor" stroke-opacity=".6"/><line x1="${left}" x2="${right}" y1="${bottom}" y2="${bottom}" stroke="currentColor" stroke-opacity=".6"/>`);
+  if (fig.yLabel) out.push(`<text transform="rotate(-90 15 ${mid(top, bottom)})" x="15" y="${mid(top, bottom)}" text-anchor="middle" font-size="13" fill="currentColor">${esc(trunc(fig.yLabel, 40))}</text>`);
+  if (fig.xLabel) out.push(`<text x="${mid(left, right)}" y="${H - 7}" text-anchor="middle" font-size="13" fill="currentColor">${esc(trunc(fig.xLabel, 50))}</text>`);
+
+  // x axis ticks / category labels
+  if (xs) {
+    for (const t of xs.ticks) {
+      out.push(`<line x1="${Xn(t).toFixed(1)}" x2="${Xn(t).toFixed(1)}" y1="${bottom}" y2="${bottom + 4}" stroke="currentColor" stroke-opacity=".6"/>`);
+      out.push(`<text x="${Xn(t).toFixed(1)}" y="${bottom + 17}" text-anchor="middle" font-size="13" fill="currentColor">${numFmt(t)}</text>`);
+    }
+  } else {
+    fig.labels.forEach((l, i) => {
+      const x = Xc(i);
+      out.push(rotate
+        ? `<text transform="rotate(-40 ${x.toFixed(1)} ${bottom + 14})" x="${x.toFixed(1)}" y="${bottom + 14}" text-anchor="end" font-size="12" fill="currentColor">${esc(trunc(l, 14))}</text>`
+        : `<text x="${x.toFixed(1)}" y="${bottom + 16}" text-anchor="middle" font-size="13" fill="currentColor">${esc(trunc(l, 14))}</text>`);
+    });
+  }
+
+  if (fig.type === "bar") {
+    const n = fig.series.length;
+    const bw = (slot * 0.72) / n;
+    fig.series.forEach((sr, si) => sr.values.forEach((v, i) => {
+      const x = Xc(i) - (slot * 0.72) / 2 + si * bw;
+      const y0 = Y(Math.max(ys.min, 0)), y1 = Y(v);
+      out.push(`<rect x="${x.toFixed(1)}" y="${Math.min(y0, y1).toFixed(1)}" width="${(bw - 1).toFixed(1)}" height="${Math.abs(y0 - y1).toFixed(1)}" style="fill:${SERIES_COLOURS[si]}"/>`);
+    }));
+  } else if (fig.type === "line") {
+    fig.series.forEach((sr, si) => {
+      const pts = sr.values.map((v, i) => [numericX ? Xn(Number(fig.labels[i])) : Xc(i), Y(v)]);
+      const order = numericX ? pts.map((p, i) => [p, Number(fig.labels[i])]).sort((a, b) => a[1] - b[1]).map((e) => e[0]) : pts;
+      out.push(`<polyline fill="none" stroke-width="2.2" points="${order.map((p) => p[0].toFixed(1) + "," + p[1].toFixed(1)).join(" ")}" style="stroke:${SERIES_COLOURS[si]}"/>`);
+      for (const p of pts) out.push(`<circle cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="3.2" style="fill:${SERIES_COLOURS[si]}"/>`);
+    });
+  } else {
+    for (const [x, y] of fig.points) out.push(`<circle cx="${Xn(x).toFixed(1)}" cy="${Y(y).toFixed(1)}" r="3.6" style="fill:${SERIES_COLOURS[0]}"/>`);
+  }
+
+  if (multi) {
+    let lx = left;
+    fig.series.forEach((sr, si) => {
+      const label = trunc(sr.name || `Series ${si + 1}`, 22);
+      out.push(`<rect x="${lx}" y="${top - 17}" width="12" height="12" rx="2" style="fill:${SERIES_COLOURS[si]}"/><text x="${lx + 17}" y="${top - 6}" font-size="13" fill="currentColor">${esc(label)}</text>`);
+      lx += 28 + label.length * 7.2;
+    });
+  }
+  return open + out.join("") + "</svg>";
+}
+
+function toItem(parts, alts = [], src = "", marks = 0, extra = {}) {
   const cells = parts.map(clean);
   const q = cells[0];
   const a = cells[1];
@@ -310,7 +551,20 @@ function toItem(parts, alts = [], src = "", marks = 0) {
   const exam = Number.isFinite(m) && m >= 1;
   const choices = exam ? [] : [...new Set(cells.slice(2).filter(Boolean))].filter((c) => normalise(c) !== normalise(a)).slice(0, 5);
   const source = clean(src).slice(0, 80);
-  if (exam) return { q: q.slice(0, 800), a: a.slice(0, 1200), choices: [], exam: true, marks: Math.min(12, m), ...(source ? { src: source } : {}) };
+  if (exam) {
+    const item = { q: q.slice(0, 800), a: a.slice(0, 1200), choices: [], exam: true, marks: Math.min(12, m), ...(source ? { src: source } : {}) };
+    if (extra.opts !== undefined && extra.opts !== null) { // exam multiple choice: options in a fixed order, worth 1 mark
+      const o = cleanOpts(extra.opts, a);
+      if (!o) return null;
+      item.opts = o.opts; item.a = o.a; item.marks = 1;
+    }
+    if (extra.fig !== undefined && extra.fig !== null) { // a graph, chart or table the question refers to
+      const f = cleanFigure(extra.fig);
+      if (!f) return null;
+      item.fig = f;
+    }
+    return item;
+  }
   return { q: q.slice(0, 500), a: mergeAnswers(a.slice(0, 300), alts), choices: choices.map((c) => c.slice(0, 200)), ...(source ? { src: source } : {}) };
 }
 
@@ -330,7 +584,7 @@ function fromJson(text) {
       const wrong = row.wrong ?? row.choices ?? row.options ?? row.distractors ?? [];
       let alts = row.alt ?? row.alts ?? row.alternatives ?? row.also ?? row.accept ?? [];
       if (typeof alts === "string") alts = alts.split(/\s*[;|]\s*/);
-      item = toItem([q, a, ...(Array.isArray(wrong) ? wrong : [])], Array.isArray(alts) ? alts : [], typeof (row.src ?? row.source) === "string" ? (row.src ?? row.source) : "", row.marks ?? row.mark ?? 0);
+      item = toItem([q, a, ...(Array.isArray(wrong) ? wrong : [])], Array.isArray(alts) ? alts : [], typeof (row.src ?? row.source) === "string" ? (row.src ?? row.source) : "", row.marks ?? row.mark ?? 0, { opts: row.opts ?? row.options ?? row.mc, fig: row.fig ?? row.figure });
     }
     if (item) items.push(item); else skipped++;
   }
@@ -640,7 +894,10 @@ export function sanitiseState(raw, catalogueIds = null) {
     const id = str(q.id, 40);
     const isExam = q.exam === true && Number.isFinite(q.marks) && q.marks >= 1;
     const text = str(q.q, isExam ? 800 : 500);
-    const answer = str(q.a, isExam ? 1200 : 300);
+    let answer = str(q.a, isExam ? 1200 : 300);
+    let opts = null, fig = null;
+    if (isExam && q.opts !== undefined && q.opts !== null) { const o = cleanOpts(q.opts, answer); if (!o) continue; opts = o.opts; answer = o.a; }
+    if (isExam && q.fig !== undefined && q.fig !== null) { fig = cleanFigure(q.fig); if (!fig) continue; }
     const subjectId = str(q.subjectId, 40);
     if (!id || !text || !answer || !subjectIds.has(subjectId) || questionIds.has(id)) continue;
     questionIds.add(id);
@@ -648,7 +905,9 @@ export function sanitiseState(raw, catalogueIds = null) {
       id, subjectId, q: text, a: answer,
       choices: (Array.isArray(q.choices) ? q.choices : []).map((c) => str(c, 200)).filter(Boolean).slice(0, 5),
       ...(str(q.src, 80) ? { src: str(q.src, 80) } : {}),
-      ...(isExam ? { exam: true, marks: Math.min(12, Math.round(q.marks)) } : {}),
+      ...(isExam ? { exam: true, marks: opts ? 1 : Math.min(12, Math.round(q.marks)) } : {}),
+      ...(opts ? { opts } : {}),
+      ...(fig ? { fig } : {}),
       box: Math.round(num(q.box, 1, MAX_BOX, 1)),
       due: typeof q.due === "string" && DATE_RE.test(q.due) ? q.due : "1970-01-01",
       right: Math.round(num(q.right, 0, 1e6, 0)),

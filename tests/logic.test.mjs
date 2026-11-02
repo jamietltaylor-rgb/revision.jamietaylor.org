@@ -491,3 +491,101 @@ Week 1`;
   assert.equal(L.parseExamList("Intro line\nRE | 17 June 2027 | GCSE", "2026-11-02").exams.length, 1);
   assert.equal(L.parseExamList("Maths\nEnglish", "2026-11-02").exams.length, 0);
 });
+
+// ---------- exam multiple choice and figures ----------
+test("examFormats only offers multiple choice and graphs for subjects whose exams really have them", () => {
+  assert.deepEqual(L.examFormats("Biology"), { mc: true, figures: ["table", "line", "bar", "scatter"] });
+  assert.equal(L.examFormats("Combined Science").mc, true);
+  assert.equal(L.examFormats("Maths").mc, false, "GCSE Maths papers don't use multiple choice");
+  assert.ok(L.examFormats("Further Maths").figures.includes("scatter"));
+  assert.deepEqual(L.examFormats("Computer Science").figures, ["table"], "not mistaken for a science");
+  assert.deepEqual(L.examFormats("Geography").figures, ["table", "bar", "line", "pie", "scatter"]);
+  for (const none of ["History", "English Literature", "French", "Art", "Religious Studies", "Music"]) assert.deepEqual(L.examFormats(none), { mc: false, figures: [] }, none);
+  assert.deepEqual(L.examFormats("", ""), { mc: false, figures: [] });
+  assert.equal(L.examFormats("Revision", "Quadratic algebra").figures.length > 0, true, "falls back to the topic when the subject name says nothing");
+  assert.equal(L.examFormats("History", "Population graphs").figures.length, 0, "a subject that doesn't use them wins over the topic");
+});
+
+test("cleanOpts finds the correct option from a letter or the text, and rejects broken sets", () => {
+  assert.deepEqual(L.cleanOpts(["A. Oxygen", "B. Carbon dioxide", "C. Nitrogen", "D. Helium"], "B"), { opts: ["Oxygen", "Carbon dioxide", "Nitrogen", "Helium"], a: "Carbon dioxide" });
+  assert.equal(L.cleanOpts(["Oxygen", "Carbon dioxide", "Nitrogen"], "carbon dioxide").a, "Carbon dioxide");
+  assert.equal(L.cleanOpts(["Oxygen", "Carbon dioxide", "Nitrogen"], "(c) Nitrogen").a, "Nitrogen");
+  assert.equal(L.cleanOpts(["x", "y", "z", "w"], "d.").a, "w");
+  assert.equal(L.cleanOpts(["a", "b"], "a"), null, "too few options");
+  assert.equal(L.cleanOpts(["a", "b", "c", "d", "e", "f"], "a"), null, "too many options");
+  assert.equal(L.cleanOpts(["same", "Same", "other"], "other"), null, "duplicate options");
+  assert.equal(L.cleanOpts(["one", "two", "three"], "four"), null, "answer isn't one of the options");
+  assert.equal(L.cleanOpts(["one", "two", "three"], "E"), null, "letter past the last option");
+  assert.equal(L.cleanOpts("nope", "a"), null);
+});
+
+test("cleanFigure accepts good tables and charts and refuses broken or unwanted ones", () => {
+  const table = L.cleanFigure({ type: "Data table", title: "Table 1", head: ["Time (s)", "Speed (m/s)"], rows: [[0, 0], [5, "12"], [10, 25]] });
+  assert.deepEqual(table, { type: "table", title: "Table 1", head: ["Time (s)", "Speed (m/s)"], rows: [["0", "0"], ["5", "12"], ["10", "25"]] });
+  const bar = L.cleanFigure({ type: "bar chart", title: "T", xLabel: "Month", yLabel: "mm", labels: ["Jan", "Feb", "Mar"], series: [{ name: "2025", values: [1, "2", 3.5] }] });
+  assert.equal(bar.type, "bar"); assert.deepEqual(bar.series[0].values, [1, 2, 3.5]);
+  assert.equal(L.cleanFigure({ type: "line graph", labels: [0, 1, 2], values: [3, 4, 5] }).series.length, 1, "a plain values list becomes one series");
+  assert.equal(L.cleanFigure({ type: "scatter graph", points: [{ x: 1, y: 2 }, [2, 3], [3, 5]] }).points.length, 3);
+  assert.equal(L.cleanFigure({ type: "pie", labels: ["a", "b", "c"], values: [50, 30, 20] }).values.length, 3);
+  // broken ones
+  assert.equal(L.cleanFigure({ type: "bar", labels: ["a", "b"], series: [{ values: [1] }] }), null, "values don't match the labels");
+  assert.equal(L.cleanFigure({ type: "bar", labels: ["a", "b"], series: [{ values: [1, "lots"] }] }), null, "a non-number");
+  assert.equal(L.cleanFigure({ type: "pie", labels: ["a", "b"], values: [5, -1] }), null);
+  assert.equal(L.cleanFigure({ type: "scatter", points: [[1, 2], [2, 3]] }), null, "too few points");
+  assert.equal(L.cleanFigure({ type: "table", head: ["only one"], rows: [["x"]] }), null);
+  assert.equal(L.cleanFigure({ type: "hologram" }), null);
+  assert.equal(L.cleanFigure(null), null);
+  assert.equal(L.cleanFigure({ type: "pie", labels: ["a", "b"], values: [1, 2] }, ["table", "bar"]), null, "not allowed for this subject");
+});
+
+test("refersToMissingFigure spots questions that point at something that isn't there", () => {
+  for (const bad of ["Figure 1 shows a cell. Name part X.", "Use the graph to find the speed.", "Look at the table below.", "The diagram above shows a circuit.", "Using Table 2, calculate the mean."]) assert.equal(L.refersToMissingFigure(bad), true, bad);
+  for (const ok of ["State the function of the mitochondria.", "Use the periodic table to name the element with atomic number 11.", "Explain why a graph of distance against time is a straight line for constant speed."]) assert.equal(L.refersToMissingFigure(ok), false, ok);
+});
+
+test("niceScale gives round axes", () => {
+  assert.deepEqual(L.niceScale(0, 97).ticks, [0, 20, 40, 60, 80, 100]);
+  assert.deepEqual(L.niceScale(3, 3.4).ticks, [3, 3.1, 3.2, 3.3, 3.4]);
+  assert.deepEqual(L.niceScale(-4, 9).ticks, [-5, 0, 5, 10]);
+  assert.deepEqual(L.niceScale(5, 5).ticks.length > 1, true);
+  assert.equal(L.niceScale(NaN, 3).min, 0);
+});
+
+test("figureSvg draws each chart type, escapes text, and describes the figure for screen readers", () => {
+  const bar = L.cleanFigure({ type: "bar", title: "Sales <script>alert(1)</script> & \"co\"", xLabel: "Month", yLabel: "£", labels: ["Jan", "Feb"], series: [{ name: "A", values: [3, 5] }, { name: "B", values: [4, 2] }] });
+  const svg = L.figureSvg(bar);
+  assert.match(svg, /^<svg /); assert.equal((svg.match(/<rect /g) || []).length, 4 + 2, "four bars and two legend swatches");
+  assert.ok(!svg.includes("<script>") && svg.includes("&lt;script&gt;") && svg.includes("&amp;") && !svg.includes('"co"'), "text is escaped");
+  assert.match(svg, /aria-label="Bar chart: Sales/);
+  const line = L.figureSvg(L.cleanFigure({ type: "line", labels: ["0", "5", "10"], series: [{ name: "", values: [1, 4, 9] }] }));
+  assert.match(line, /<polyline/); assert.equal((line.match(/<circle/g) || []).length, 3);
+  assert.match(L.figureSvg(L.cleanFigure({ type: "scatter", points: [[1, 2], [2, 3], [3, 5]] })), /<circle/);
+  const pie = L.figureSvg(L.cleanFigure({ type: "pie", labels: ["a", "b", "c"], values: [1, 1, 2] }));
+  assert.equal((pie.match(/<path /g) || []).length, 3); assert.match(pie, /50%/);
+  assert.match(L.figureSvg(L.cleanFigure({ type: "pie", labels: ["a", "b"], values: [100000, 1] })), /<circle/);
+  assert.equal(L.figureSvg(L.cleanFigure({ type: "table", head: ["a", "b"], rows: [["1", "2"]] })), "", "tables are drawn by the page");
+  assert.match(L.figureAlt(bar), /Jan 3, Feb 5/);
+});
+
+test("exam multiple choice and figure questions survive reading, saving and loading", () => {
+  const json = JSON.stringify([
+    { q: "Which gas is needed?", marks: 1, opts: ["Oxygen", "Carbon dioxide", "Nitrogen", "Helium"], a: "B" },
+    { q: "Figure 1 shows rainfall. Which month was wettest?", marks: 3, a: "March; 60 mm; reads highest bar", fig: { type: "bar", title: "Figure 1", labels: ["Jan", "Feb", "Mar"], series: [{ values: [20, 30, 60] }] } },
+    { q: "Broken options", marks: 1, opts: ["only", "two"], a: "only" },
+    { q: "Broken figure", marks: 2, a: "x", fig: { type: "bar", labels: ["a"], series: [] } },
+    { q: "Plain written", marks: 4, a: "a; b; c; d" },
+  ]);
+  const r = L.parseQuestionList(json);
+  assert.equal(r.items.length, 3); assert.equal(r.skipped, 2);
+  const [mc, fig, plain] = r.items;
+  assert.equal(mc.a, "Carbon dioxide"); assert.equal(mc.marks, 1); assert.equal(mc.opts.length, 4); assert.equal(mc.exam, true);
+  assert.equal(fig.fig.type, "bar"); assert.equal(plain.opts, undefined); assert.equal(plain.fig, undefined);
+  // saved state keeps both, and drops a corrupted one
+  const state = L.emptyState(); state.subjects.push({ id: "s1", name: "Biology – Exam questions" });
+  state.questions.push({ id: "q1", subjectId: "s1", ...mc, box: 1, due: "2026-11-02", right: 0, wrong: 0 }, { id: "q2", subjectId: "s1", ...fig, box: 1, due: "2026-11-02", right: 0, wrong: 0 },
+    { id: "q3", subjectId: "s1", q: "bad", a: "x", choices: [], exam: true, marks: 1, opts: ["x"], box: 1, due: "2026-11-02", right: 0, wrong: 0 });
+  const back = L.sanitiseState(JSON.parse(JSON.stringify(state)));
+  assert.equal(back.questions.length, 2, "the corrupted multiple-choice question was dropped");
+  assert.deepEqual(back.questions[0].opts, mc.opts); assert.equal(back.questions[0].a, "Carbon dioxide"); assert.equal(back.questions[1].fig.series[0].values[2], 60);
+  assert.equal(L.parseQuestionList("Q | A | wrong1 | wrong2").items[0].opts, undefined, "ordinary quick questions never get options or figures");
+});

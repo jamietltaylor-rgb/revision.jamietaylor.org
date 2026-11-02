@@ -159,6 +159,7 @@ async function playRound(w, { wrongFirst = false } = {}) {
 {
   const fake = fakeSupabase();
   const aiCalls = [];
+  const examCalls = [];
   const checkCalls = [];
   let aiMode = "ok";
   let checkMode = "yes";
@@ -168,6 +169,13 @@ async function playRound(w, { wrongFirst = false } = {}) {
       assert.ok(init.headers.Authorization.startsWith("Bearer "), "AI check must carry the login token");
       if (checkMode === "down") return new Response("{}", { status: 502 });
       return new Response(JSON.stringify({ correct: checkMode === "yes", why: "test" }), { status: 200 });
+    }
+    if (String(url).startsWith("/api/generate") && JSON.parse(init.body).mode === "exam") {
+      examCalls.push(JSON.parse(init.body));
+      return new Response(JSON.stringify({ questions: [
+        { q: "Which gas do plants take in for photosynthesis?", a: "Carbon dioxide", choices: [], exam: true, marks: 1, opts: ["Oxygen", "Carbon dioxide", "Nitrogen", "Helium"] },
+        { q: "Figure 1 shows the rate of photosynthesis at different light intensities. Describe the trend shown.", a: "rate increases; then levels off", choices: [], exam: true, marks: 2, fig: { type: "line", title: "Figure 1: Rate of photosynthesis", xLabel: "Light intensity (a.u.)", yLabel: "Rate (mg/h)", labels: ["0", "2", "4", "6", "8"], series: [{ name: "", values: [0, 4, 7, 8, 8] }] } },
+      ] }), { status: 200 });
     }
     if (String(url).startsWith("/api/generate")) {
       aiCalls.push(JSON.parse(init.body));
@@ -299,6 +307,55 @@ async function playRound(w, { wrongFirst = false } = {}) {
     const n = checkCalls.length; w.btn("Next →").click();
     checkMode = "yes"; inp = typedQuestion(); const q4 = all(w.app, (e) => e.className === "quiz-q")[0].textContent; inp.value = fake.rows.get(userId).data.questions.find((x) => x.q === q4).a.split(";")[0].trim(); fire(inp, "keydown", { key: "Enter" }); await w.flush();
     assert.equal(checkCalls.length, n, "an answer our own matching accepts never goes to the AI");
+  }
+
+  // exam-style multiple choice and graph questions: made for the right subject, shown as on a paper, marked automatically
+  {
+    w.tab(2);
+    const sel = (pred) => all(w.app, (e) => e.tagName === "SELECT" && pred(e))[0];
+    const typeSel = sel((e) => e.attrs["aria-label"] === "Type of questions"); typeSel.value = "exam"; fire(typeSel, "change", { target: typeSel });
+    const subSel = sel((e) => e.attrs.id === "form-subject"); subSel.value = "__new"; fire(subSel, "change", { target: subSel });
+    w.typeInto(w.input((e) => String(e.attrs.placeholder || "").startsWith("e.g. Biology (leave blank")), "Biology");
+    w.typeInto(w.byPlaceholder("e.g. Photosynthesis, or The causes of World War 1"), "Photosynthesis");
+    w.btn("✨ Make questions for me").click(); await w.flush();
+    assert.ok(examCalls.length >= 1); assert.equal(examCalls[0].subject, "Biology", "the maker is told the subject, so it knows which question types the exam has");
+    w.say("Check these before adding (2)"); w.say("multiple choice"); w.say("A. Oxygen"); w.say("Correct answer: B. Carbon dioxide"); w.say("line chart");
+    const chart = all(w.app, (e) => e.className === "fig-chart")[0]; assert.ok(chart && chart.innerHTML.includes("<svg") && chart.innerHTML.includes("polyline"), "the graph is drawn in the preview");
+    w.btn("Add 2 questions").click(); await w.flush();
+    const saved = fake.rows.get(userId).data.questions.filter((x) => x.opts || x.fig);
+    assert.equal(saved.length, 2, "options and figure were saved to the account");
+    assert.deepEqual(saved.find((x) => x.opts).opts, ["Oxygen", "Carbon dioxide", "Nitrogen", "Helium"]); assert.equal(saved.find((x) => x.opts).marks, 1);
+    assert.equal(saved.find((x) => x.fig).fig.type, "line");
+    assert.ok(fake.rows.get(userId).data.subjects.some((x) => x.name === "Biology – Exam questions"));
+    // answer them in the Exam tab
+    w.tab(1);
+    // finish any round left open by earlier checks
+    for (let g = 0; g < 40 && !w.app.textContent.includes("right first time"); g++) {
+      const nextBtn = w.buttons("Next →")[0] || w.buttons("Finish")[0]; if (nextBtn) { nextBtn.click(); continue; }
+      const inp = all(w.app, (e) => e.tagName === "INPUT" && e.attrs.id === "answer")[0]; if (inp) { inp.value = "zzz"; fire(inp, "keydown", { key: "Enter" }); await w.flush(); continue; }
+      const ch = all(w.app, (e) => e.tagName === "BUTTON" && e.parent?.className === "choices")[0]; if (ch) { ch.click(); continue; }
+      break;
+    }
+    if (w.buttons("Another round").length) w.btn("Another round").click();
+    const examTab = all(w.app, (e) => e.tagName === "BUTTON" && String(e.className).includes("mode-tab") && e.textContent.includes("Exam questions"))[0]; examTab.click();
+    w.start();
+    let sawMc = false, sawFig = false;
+    for (let guard = 0; guard < 12 && !w.app.textContent.includes("right first time"); guard++) {
+      const q = all(w.app, (e) => e.className === "quiz-q")[0]; assert.ok(q, "no question on screen: " + w.app.textContent.slice(0, 200));
+      const retry = w.app.textContent.includes("Second chance");
+      if (q.textContent.startsWith("Which gas")) {
+        sawMc = true;
+        assert.ok(w.buttons("A. Oxygen").length && w.buttons("D. Helium").length, "options are lettered in a fixed order");
+        if (retry) { w.btn("B. Carbon dioxide").click(); w.say("Correct!"); }
+        else { w.btn("A. Oxygen").click(); w.say("Not quite"); w.say("You chose: A. Oxygen"); w.say("Correct answer: B. Carbon dioxide"); }
+      } else {
+        sawFig = true;
+        assert.ok(all(w.app, (e) => e.className === "fig-chart").length === 1, "the graph is shown with the question");
+        const box = all(w.app, (e) => e.tagName === "TEXTAREA")[0]; w.typeInto(box, "It increases then levels off"); w.btn("Mark my answer").click(); await w.flush();
+      }
+      (w.buttons("Finish").length ? w.btn("Finish") : w.btn("Next →")).click();
+    }
+    assert.ok(sawMc && sawFig, "both kinds of exam question were asked");
   }
 
   // a revoked session drops you back to the sign-in page without crashing

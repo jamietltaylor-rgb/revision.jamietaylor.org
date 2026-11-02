@@ -793,6 +793,23 @@ function currentQuestion() {
   return null;
 }
 
+const LETTERS = "ABCDE";
+/** A graph, chart or table from an exam question. */
+function figureView(fig) {
+  if (!fig) return null;
+  if (fig.type === "table") {
+    return h("figure", { class: "figure" },
+      fig.title && h("figcaption", {}, fig.title),
+      h("div", { class: "fig-scroll" }, h("table", { class: "fig-table" },
+        h("thead", {}, h("tr", {}, fig.head.map((c) => h("th", { scope: "col" }, c)))),
+        h("tbody", {}, fig.rows.map((r) => h("tr", {}, r.map((c) => h("td", {}, c))))))));
+  }
+  const box = h("div", { class: "fig-chart" });
+  box.innerHTML = L.figureSvg(fig); // the SVG text is built from escaped, checked data only
+  return h("figure", { class: "figure" }, box);
+}
+const optLabel = (q, text) => { const i = q.opts ? q.opts.indexOf(text) : -1; return i === -1 ? text : `${LETTERS[i]}. ${text}`; };
+
 function viewQuestion() {
   const q = currentQuestion();
   if (!q) { finishSession(); return viewSummary(); }
@@ -813,9 +830,24 @@ function viewQuestion() {
 
   const body = h("div", {},
     h("div", { class: "row", style: "margin-top:.8rem" }, h("span", { class: "tag" }, subject ? subject.name : "Question"), q.exam && h("span", { class: "tag" }, `📝 ${q.marks} mark${q.marks === 1 ? "" : "s"}`), q.src && h("span", { class: "tag" }, `📄 ${q.src}`), item.retry && h("span", { class: "tag" }, "Second chance — no points")),
-    h("p", { class: "quiz-q" }, q.q));
+    h("p", { class: "quiz-q" }, q.q),
+    q.fig && figureView(q.fig));
 
   if (q.exam) {
+    if (q.opts) { // exam multiple choice: fixed order, marked automatically
+      if (session.stage === "ask") {
+        body.append(h("div", { class: "choices" }, q.opts.map((o, i) => h("button", { onclick: () => submitMc(o) }, `${LETTERS[i]}. ${o}`))),
+          h("div", { style: "margin-top:.6rem" }, h("button", { class: "ghost", onclick: () => submitMc("") }, "I don't know")));
+      } else {
+        const ok = session.verdict;
+        body.append(h("div", { class: "verdict " + (ok ? "good" : "bad"), role: "status" },
+          ok ? "✅ Correct! 1 out of 1 mark" : session.dontKnow ? "No problem — here's the answer:" : "❌ Not quite — 0 out of 1 mark",
+          session.given && h("span", { class: "ans" }, `You chose: ${optLabel(q, session.given)}`),
+          !ok && h("span", { class: "ans" }, `Correct answer: ${optLabel(q, q.a)}`)),
+          h("div", { class: "row" }, h("button", { class: "primary", onclick: () => commit(ok) }, "Next →")));
+      }
+      return h("section", { class: "card" }, head, body);
+    }
     if (session.stage === "ask") {
       const box = h("textarea", { id: "answer", maxlength: 2000, style: "min-height:8rem", placeholder: "Write your answer here (or think it through), then check the mark scheme", "aria-label": "Your answer" });
       body.append(box, h("div", { class: "row", style: "margin-top:.7rem" },
@@ -831,7 +863,7 @@ function viewQuestion() {
         `${passed ? "✅" : "❌"} ${r.awarded} out of ${r.total} mark${r.total === 1 ? "" : "s"}`,
         session.given && h("span", { class: "ans" }, `You wrote: ${session.given}`)),
         h("ul", { style: "list-style:none;margin:.6rem 0;padding:0" }, r.points.map((x) => h("li", { style: "padding:.15rem 0" }, `${x.met ? "✅" : "❌"} ${x.text}`))),
-        r.feedback && h("p", {}, r.feedback),
+        ...(r.feedback ? [h("p", {}, r.feedback)] : []),
         h("p", { class: "small muted" }, r.source === "ai" ? "Marked by AI — it's a good guide but not perfect." : r.source === "local" ? "Marked by matching key words (the AI marker wasn't available), so it can miss answers worded differently." : "Here is the mark scheme."),
         h("div", { class: "row" },
           h("button", { class: "primary", onclick: () => commit(passed) }, "Next →"),
@@ -870,6 +902,16 @@ function viewQuestion() {
     setTimeout(() => next.focus(), 0);
   }
   return h("section", { class: "card" }, head, body);
+}
+
+function submitMc(chosen) {
+  const q = currentQuestion();
+  if (!q || !session || !q.opts) return;
+  session.given = String(chosen || "");
+  session.dontKnow = !chosen;
+  session.verdict = Boolean(chosen) && chosen === q.a;
+  session.stage = "feedback";
+  render();
 }
 
 async function submitExam(written) {
@@ -1037,7 +1079,7 @@ function ensureSubject(fallbackName = "") {
   }
   return draft.subjectId;
 }
-const makeQuestion = (subjectId, q, a, choices = [], src = "", exam = null) => ({ id: L.uid(), subjectId, q, a, choices, ...(src ? { src: String(src).slice(0, 80) } : {}), ...(exam ? { exam: true, marks: exam.marks } : {}), box: 1, due: today(), right: 0, wrong: 0 });
+const makeQuestion = (subjectId, q, a, choices = [], src = "", exam = null) => ({ id: L.uid(), subjectId, q, a, choices, ...(src ? { src: String(src).slice(0, 80) } : {}), ...(exam ? { exam: true, marks: exam.marks, ...(exam.opts ? { opts: exam.opts } : {}), ...(exam.fig ? { fig: exam.fig } : {}) } : {}), box: 1, due: today(), right: 0, wrong: 0 });
 
 function addQuestion() {
   const q = draft.q.trim();
@@ -1067,6 +1109,11 @@ function checkPaste() {
   setPreview("paste", r.items, r.skipped);
   render();
 }
+/** The subject the questions are going into (without " – Exam questions"), so the maker knows which question types the real exam has. */
+function chosenSubjectName() {
+  const chosen = state.subjects.find((x) => x.id === draft.subjectId);
+  return (chosen ? chosen.name : draft.newSubject).replace(/ – Exam questions$/, "").replace(/^Example: /, "").replace(/\s*\(delete me\)$/i, "").trim().slice(0, 60);
+}
 const MAX_COUNT = 50;
 const maxCount = () => (draft.mode === "exam" ? 20 : MAX_COUNT);
 function wantedCount() { return Math.max(1, Math.min(maxCount(), Math.round(Number(draft.count)) || (draft.mode === "exam" ? 5 : 10))); }
@@ -1085,7 +1132,7 @@ async function makeWithAi() {
     for (let guard = 0; items.length < total && guard < Math.ceil(total / chunk) + 2; guard++) {
       if (total > chunk) { draft.progress = `Writing… ${items.length} of ${total}`; render(); }
       const ask = Math.min(chunk, total - items.length);
-      const r = await cloud.generate({ topic, level: draft.level, count: ask, style: draft.style, paper: draft.paper, board: draft.board, mode: draft.mode, avoid: items.slice(-30).map((x) => x.q) });
+      const r = await cloud.generate({ topic, subject: chosenSubjectName(), level: draft.level, count: ask, style: draft.style, paper: draft.paper, board: draft.board, mode: draft.mode, avoid: items.slice(-30).map((x) => x.q) });
       const got = (Array.isArray(r && r.questions) ? r.questions : []).filter((x) => x && x.q && x.a);
       let fresh = 0;
       for (const x of got) {
@@ -1143,7 +1190,7 @@ function addPreview() {
     if (!made) return toast("You have too many subjects already — delete one first.");
     examSubjectId = made.id;
   }
-  for (const it of keep) state.questions.push(it.exam ? makeQuestion(examSubjectId, it.q, it.a, [], it.src || "", { marks: it.marks }) : makeQuestion(subjectId, it.q, it.a, it.choices || [], it.src || ""));
+  for (const it of keep) state.questions.push(it.exam ? makeQuestion(examSubjectId, it.q, it.a, [], it.src || "", { marks: it.marks, opts: it.opts, fig: it.fig }) : makeQuestion(subjectId, it.q, it.a, it.choices || [], it.src || ""));
   state.stats.created += keep.length;
   draft.preview = null; draft.paste = ""; draft.prompt = "";
   checkBadges();
@@ -1242,7 +1289,14 @@ function viewQuestions() {
       h("label", {}, "Exam board", h("select", { "aria-label": "Exam board", onchange: (e) => { draft.board = e.target.value; state.settings.board = e.target.value === "Any exam board" ? "" : e.target.value; save(); render(); } }, L.BOARDS.map((x) => opt(x, x, draft.board))))),
     h("label", {}, "Type of questions", h("select", { "aria-label": "Type of questions", onchange: (e) => { draft.mode = e.target.value; if (draft.mode === "exam" && Number(draft.count) > 20) draft.count = "5"; render(); } },
       [["quick", "Quick questions (short answers)"], ["exam", "Complete exam questions (marks + mark scheme)"]].map(([v, l]) => opt(v, l, draft.mode)))),
-    draft.mode === "exam" && h("p", { class: "small muted", style: "margin:0 0 .6rem" }, "Full questions like the ones on a paper, each worth 2–6 marks. You write your answer, check the mark scheme and mark yourself. They're saved as their own topic, like “Biology – Exam questions”, so they stay separate from your quick questions."),
+    draft.mode === "exam" && h("p", { class: "small muted", style: "margin:0 0 .6rem" }, "Full questions like the ones on a paper, each worth 2–6 marks. You write your answer and the app marks it for you. They're saved as their own topic, like “Biology – Exam questions”, so they stay separate from your quick questions."),
+    draft.mode === "exam" && (() => {
+      const f = L.examFormats(chosenSubjectName(), draft.topic);
+      const kinds = [f.mc && "multiple choice (1 mark, options A–D)", f.figures.length && `questions with a ${f.figures.map((x) => (x === "table" ? "table" : x + " chart")).join(", ").replace(/line chart/, "line graph").replace(/scatter chart/, "scatter graph")}`].filter(Boolean);
+      return h("p", { class: "small muted", style: "margin:0 0 .6rem" }, kinds.length
+        ? `${chosenSubjectName() || "This subject"}’s exams usually have ${kinds.join(" and ")}, so some questions will too.`
+        : "I only add multiple-choice and graph questions for subjects whose exams really have them (like the sciences, Maths, Geography and Business). Choose or name the subject above, e.g. Biology, and I'll include them if they fit.");
+    })(),
     h("p", { class: "small muted", style: "margin:0 0 .4rem" }, draft.board !== "Any exam board" ? `Questions will follow the ${draft.board} specification. Your board is remembered.` : "Pick your exam board and the questions will follow its specification. It's remembered for next time."),
     h("label", { class: "row", style: "gap:.6rem;font-weight:600;margin:.3rem 0 .4rem" },
       h("input", { type: "checkbox", style: "width:auto;min-height:0;margin:0", checked: draft.paper, onchange: (e) => { draft.paper = e.target.checked; render(); } }),
@@ -1279,7 +1333,12 @@ function viewQuestions() {
       p.skipped > 0 && h("p", { class: "small muted" }, `${plural(p.skipped, "line")} couldn't be read and ${p.skipped === 1 ? "was" : "were"} skipped.`),
       p.items.map((it) => h("label", { class: "pick" },
         h("input", { type: "checkbox", checked: it.keep, onchange: (e) => { it.keep = e.target.checked; render(); } }),
-        h("span", {}, h("b", {}, it.q), h("span", { class: "a" }, `${it.exam ? `Mark scheme (${it.marks} marks)` : "Answer"}: ${it.a}${it.choices && it.choices.length ? `  ·  wrong options: ${it.choices.join(", ")}` : ""}`), it.duplicate && h("span", { class: "tag" }, "already in this subject")))),
+        h("span", {}, h("b", {}, it.q),
+          it.fig && figureView(it.fig),
+          it.opts && h("span", { class: "a" }, it.opts.map((o, i) => `${LETTERS[i]}. ${o}`).join("    ")),
+          h("span", { class: "a" }, `${it.opts ? "Correct answer" : it.exam ? `Mark scheme (${it.marks} marks)` : "Answer"}: ${it.opts ? optLabel(it, it.a) : it.a}${it.choices && it.choices.length ? `  ·  wrong options: ${it.choices.join(", ")}` : ""}`),
+          it.opts && h("span", { class: "tag" }, "🔠 multiple choice"), it.fig && h("span", { class: "tag" }, `📊 ${it.fig.type === "table" ? "table" : it.fig.type + " chart"}`),
+          it.duplicate && h("span", { class: "tag" }, "already in this subject")))),
       h("div", { class: "row", style: "margin-top:.8rem" },
         h("button", { class: "primary", onclick: addPreview }, `Add ${plural(picked, "question")}`),
         h("button", { onclick: () => { draft.preview = null; render(); } }, "Cancel")));
@@ -1302,7 +1361,8 @@ function viewQuestions() {
     listBox.replaceChildren(...[
       shown.length === 0 && h("p", { class: "muted" }, state.questions.length ? "No questions match." : "No questions yet."),
       ...shown.slice(0, 150).map((q) => h("div", { class: "item" },
-        h("div", { class: "txt" }, h("div", {}, q.q), h("div", { class: "a" }, q.exam ? `Mark scheme (${q.marks} marks): ${q.a}` : `Answer: ${q.a}${q.choices.length ? "  ·  multiple choice" : ""}`),
+        h("div", { class: "txt" }, h("div", {}, q.q), h("div", { class: "a" }, q.opts ? `Multiple choice — correct: ${optLabel(q, q.a)}` : q.exam ? `Mark scheme (${q.marks} marks): ${q.a}` : `Answer: ${q.a}${q.choices.length ? "  ·  multiple choice" : ""}`),
+          q.fig && h("div", { class: "small muted" }, `📊 Includes a ${q.fig.type === "table" ? "table" : q.fig.type + " chart"}${q.fig.title ? ": " + q.fig.title : ""}`),
           h("div", { class: "small muted" }, `${q.src ? "📄 " + q.src + " · " : ""}${names.get(q.subjectId) || ""} · box ${q.box}/5 · next ${q.due <= today() ? "now" : niceDate(q.due)}`)),
         h("button", { class: "ghost small danger", "aria-label": `Delete question: ${q.q}`, onclick: () => deleteQuestion(q.id) }, "✕"))),
       shown.length > 150 && h("p", { class: "muted small" }, `Showing the first 150 of ${shown.length}. Use the search box to narrow it down.`),
