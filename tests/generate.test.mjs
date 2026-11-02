@@ -69,3 +69,43 @@ test("login check failing in transit is a clear error", async () => {
   const r = await call(post({ topic: "ok" }), env({}));
   assert.equal(r.status, 502);
 });
+
+test("existing questions are passed to the AI so rounds don't repeat", async () => {
+  stubAuth(); let prompt = "";
+  const reply = JSON.stringify([{ q: "New one?", a: "yes", wrong: [] }]);
+  await call(post({ topic: "Maths", count: 3, avoid: ["Old question one?", "Old question two?", 42] }), env({ run: async (m, i) => { prompt = i.messages[1].content; return { response: reply }; } }));
+  assert.match(prompt, /Old question one\?/);
+  assert.match(prompt, /Old question two\?/);
+});
+
+test("past-paper mode tags the questions and other accepted answers are kept", async () => {
+  stubAuth(); let prompt = "";
+  const reply = JSON.stringify([{ q: "Name the gas plants take in.", a: "carbon dioxide", alt: ["CO2"], wrong: [] }]);
+  const r = await call(post({ topic: "Photosynthesis", count: 1, paper: true, board: "AQA" }), env({ run: async (m, i) => { prompt = i.messages[1].content; return { response: reply }; } }));
+  assert.match(prompt, /AQA/); assert.match(prompt, /past-paper/);
+  assert.equal(r.body.questions[0].src, "AQA past-paper style");
+  assert.equal(r.body.questions[0].a, "carbon dioxide; CO2");
+  const plain = await call(post({ topic: "Photosynthesis", count: 1, board: "Nonsense" }), env({ run: async () => ({ response: reply }) }));
+  assert.equal(plain.body.questions[0].src, undefined);
+});
+
+test("exam mode returns complete questions with marks and mark schemes, tailored to the board", async () => {
+  stubAuth(); let prompt = "";
+  const reply = JSON.stringify([{ q: "Explain why plants need light. [4 marks]", marks: 4, a: "photosynthesis ; glucose ; chlorophyll ; energy" }, { q: "Not an exam question", a: "x" }]);
+  const r = await call(post({ topic: "Plants", count: 50, mode: "exam", board: "Edexcel", paper: true }), env({ run: async (m, i) => { prompt = i.messages[1].content; return { response: reply }; } }));
+  assert.match(prompt, /Edexcel specification/); assert.match(prompt, /mark scheme/);
+  assert.equal(r.body.questions.length, 1); assert.equal(r.body.questions[0].marks, 4); assert.equal(r.body.questions[0].exam, true);
+  assert.equal(r.body.questions[0].src, "Edexcel past-paper style");
+  const q = await call(post({ topic: "Plants", count: 3, board: "AQA" }), env({ run: async (m, i) => { prompt = i.messages[1].content; return { response: JSON.stringify([{ q: "Q?", a: "A" }]) }; } }));
+  assert.match(prompt, /AQA specification/);
+});
+
+test("opening the address in a browser reports what is set up, without secrets", async () => {
+  const { onRequestGet } = await import("../functions/api/generate.js");
+  const r = async (e) => { const res = await onRequestGet({ env: e }); return { status: res.status, body: await res.json() }; };
+  assert.deepEqual((await r({})).body, { ok: true, login: false, ai: false });
+  assert.deepEqual((await r({ SUPABASE_URL: "https://x.supabase.co", SUPABASE_PUBLISHABLE_KEY: "sb_publishable_secret" })).body, { ok: true, login: true, ai: false });
+  const full = await r({ SUPABASE_URL: "u", SUPABASE_PUBLISHABLE_KEY: "k", AI: {} });
+  assert.deepEqual(full.body, { ok: true, login: true, ai: true });
+  assert.ok(!JSON.stringify(full.body).includes("sb_publishable"));
+});

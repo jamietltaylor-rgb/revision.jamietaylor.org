@@ -174,10 +174,27 @@ export function createCloud(config, { fetchFn = (...a) => globalThis.fetch(...a)
     return json;
   }
 
+  /** Asks the Cloudflare Function whether a typed answer should count (typo, synonym, another right answer). */
+  async function checkAnswer(request) {
+    const token = await freshToken();
+    const url = config.checkEndpoint || String(config.aiEndpoint || "/api/generate").replace(/generate$/, "check");
+    let res;
+    try {
+      res = await fetchFn(url, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify(request) });
+    } catch {
+      throw new CloudError("Can't reach the server — check your internet connection.", "offline");
+    }
+    let json = null;
+    try { json = await res.json(); } catch { json = null; }
+    if (res.status === 404 || res.status === 405) throw new CloudError("The checker isn't switched on yet.", "not_installed");
+    if (!res.ok || !json || typeof json.correct !== "boolean") throw new CloudError((json && json.error) || "The checker had a problem.", String(res.status));
+    return json;
+  }
+
   return {
     enabled,
     get user() { return session ? session.user : null; },
     get signedIn() { return Boolean(session); },
-    signUp, signIn, signOut, restore, loadData, saveData, generate, markAnswer,
+    signUp, signIn, signOut, restore, loadData, saveData, generate, markAnswer, checkAnswer,
   };
 }

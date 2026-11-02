@@ -840,6 +840,11 @@ function viewQuestion() {
     return h("section", { class: "card" }, head, body);
   }
 
+  if (session.stage === "checking") {
+    body.append(h("p", { class: "verdict", role: "status" }, "⏳ Checking your answer…"));
+    return h("section", { class: "card" }, head, body);
+  }
+
   if (session.stage === "ask") {
     const dontKnow = h("button", { class: "ghost", onclick: () => check("", true) }, "I don't know");
     if (session.shown.options) {
@@ -854,9 +859,9 @@ function viewQuestion() {
     const ok = session.verdict;
     const right = L.acceptedAnswers(q.a).join("  /  ") || q.a;
     body.append(h("div", { class: "verdict " + (ok ? "good" : "bad"), role: "status" },
-      ok ? "✅ Correct!" : session.dontKnow ? "No problem — here's the answer:" : "❌ Not quite",
+      ok ? (session.aiAccepted ? "✅ Counts as correct!" : "✅ Correct!") : session.dontKnow ? "No problem — here's the answer:" : "❌ Not quite",
       session.given && !session.shown.options && h("span", { class: "ans" }, `You wrote: ${session.given}`),
-      !ok || session.shown.options ? h("span", { class: "ans" }, `Answer: ${right}`) : null));
+      !ok || session.shown.options || session.aiAccepted || !sameAsAnswer(session.given, q.a) ? h("span", { class: "ans" }, `${ok && !session.shown.options ? "Exact answer" : "Answer"}: ${right}`) : null));
     const last = session.index >= total - 1 && !(!ok && !item.retry);
     const next = h("button", { class: "primary", onclick: () => commit(ok) }, last ? "Finish" : "Next →");
     body.append(h("div", { class: "row" }, next,
@@ -895,6 +900,11 @@ async function submitExam(written) {
   render();
 }
 
+function sameAsAnswer(given, expected) {
+  const norm = (x) => String(x || "").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+  return L.acceptedAnswers(expected).some((a) => norm(a) === norm(given));
+}
+
 function acceptMine(q) {
   const mine = String(session.given || "").trim();
   if (!mine || L.isCorrect(mine, q.a)) return;
@@ -905,9 +915,27 @@ function acceptMine(q) {
 function check(given, dontKnow = false) {
   const q = currentQuestion();
   if (!q) return;
-  session.verdict = !dontKnow && L.isCorrect(given, q.a);
   session.given = dontKnow ? "" : String(given).trim();
   session.dontKnow = dontKnow;
+  session.aiAccepted = false;
+  session.verdict = !dontKnow && L.isCorrect(given, q.a);
+  const typed = !session.shown.options;
+  // Our own matching said no: let the AI decide if it's a typo, a synonym or another right answer.
+  if (!session.verdict && !dontKnow && typed && session.given && cloud.signedIn) return askAiToCheck(q);
+  session.stage = "feedback";
+  render();
+}
+
+async function askAiToCheck(q) {
+  const at = session.index;
+  const given = session.given;
+  session.stage = "checking";
+  render();
+  try {
+    const r = await cloud.checkAnswer({ q: q.q, a: q.a, answer: given });
+    if (r.correct) { session.verdict = true; session.aiAccepted = true; }
+  } catch { /* the AI is unavailable: the normal "not quite" result stands */ }
+  if (!session || session.index !== at || session.stage !== "checking") return;
   session.stage = "feedback";
   render();
 }

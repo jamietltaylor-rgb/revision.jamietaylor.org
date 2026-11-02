@@ -122,3 +122,14 @@ test("generate sends the login token and explains problems", async () => {
   const busy = mk(new Response(JSON.stringify({ error: "Busy, try later" }), { status: 502 })); await busy.signUp("jamie4", "secret1");
   assert.equal((await fails(busy.generate({}))).message, "Busy, try later");
 });
+
+test("markAnswer goes to /api/mark with the login token", async () => {
+  const fake = fakeSupabase();
+  let seen;
+  const mk = (res) => createCloud(CONFIG, { fetchFn: async (url, init) => { if (url.startsWith("/api")) { seen = { url, init }; return res; } return fake.fetch(url, init); }, storage: memory(), now: () => fake.clock });
+  const ok = mk(new Response(JSON.stringify({ awarded: 2, total: 4, points: [{ text: "a", met: true }], feedback: "" }), { status: 200 })); await ok.signUp("jamie", "secret1");
+  const r = await ok.markAnswer({ q: "q", a: "a", marks: 4, answer: "x" });
+  assert.equal(seen.url, "/api/mark"); assert.equal(r.awarded, 2); assert.ok(seen.init.headers.Authorization.startsWith("Bearer "));
+  const missing = mk(new Response("nope", { status: 404 })); await missing.signUp("jamie2", "secret1");
+  assert.equal((await fails(missing.markAnswer({}), "not_installed")).code, "not_installed");
+});

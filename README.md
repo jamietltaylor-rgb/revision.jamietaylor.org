@@ -43,3 +43,13 @@ Then redeploy (Deployments → the latest one → Retry, or make any small commi
 - **Past-paper style questions** – tick the box in *Make questions on a topic* and pick an exam board. Questions are tagged "past-paper style". Real past papers are copyrighted and an AI can't quote them reliably, so for the genuine papers use the exam board's own website.
 - **Answers** – other correct wordings are accepted (number words, plurals, extra words, word order, small typos, the distinctive part of a name). If it still marks you wrong, "I was right ✔" counts it and remembers your wording.
 - Nothing new to set up in Supabase or Cloudflare.
+- **Exam board** – pick it once in *Make questions on a topic*; it's remembered and used to tailor every question set.
+- **Complete exam questions** – choose "Complete exam questions" as the type. You get full questions worth 2–6 marks, write your answer, reveal the mark scheme and mark yourself. They're saved as their own topic, e.g. "Biology – Exam questions".
+- **Marking** – typed answers to complete exam questions are marked by the AI against the mark scheme (new file `functions/api/mark.js`, same setup as the question maker). If the AI isn't available, the app falls back to matching key words.
+- **Smart answer checking** – if you're signed in and a typed short answer doesn't match, the AI (new file `functions/api/check.js`, same setup as the question maker) decides whether it's a typo, a synonym or another correct answer. If yes it counts as correct, and the exact answer is still shown. If the AI isn't available the normal result stands.
+- **Photo of a timetable** – in the Plan tab's paste box, "Copy a prompt to turn a photo into a list" gives you text to paste into another AI (with your photo attached). Paste its reply back into the box.
+- **Erase a topic's questions** – the Questions tab's "Your topics" card has "Erase questions" (keeps the topic) and "Delete topic" (removes both).
+- **Add to home screen** – the bottom of the Home tab has step-by-step instructions for iPhone/iPad, Android and computers (with an "Install now" button where the browser allows it).
+- **Confirm boxes** – erasing or deleting now asks in the app itself instead of the browser's pop-up.
+- **Revise tab** has two sub-tabs, ⚡ Quick questions and 📝 Exam questions, so you can practise them separately.
+- **Checking the AI setup** – open `/api/generate` on your site in a browser. `{"ok":true,"login":true,"ai":true}` means everything is connected. The Questions tab also has a "Check it's set up" button.

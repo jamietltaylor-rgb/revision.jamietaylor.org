@@ -106,7 +106,7 @@ async function playRound(w, { wrongFirst = false } = {}) {
 {
   const w = makeWorld({ label: "local", fetchFn: async () => { throw new Error("no network expected"); } });
   await boot(w, dirCopy(null));
-  w.say("Ready to revise?"); w.say("Pip the Egg"); assert.equal(w.nav.children.length, 5); assert.equal(w.user.children.length, 0, "no account bar without logins");
+  w.say("Ready to revise?"); w.say("Pip the Egg"); assert.equal(w.nav.children.length, 6); assert.equal(w.user.children.length, 0, "no account bar without logins");
   await playRound(w, { wrongFirst: true });
   let saved = JSON.parse(w.store.get("revise-app-v1"));
   assert.equal(saved.v, 2); assert.equal(saved.stats.answered, 5); assert.ok(saved.stats.points >= 40);
@@ -125,6 +125,30 @@ async function playRound(w, { wrongFirst = false } = {}) {
   assert.deepEqual(saved.questions.find((q) => q.a === "Rome").choices, ["Milan", "Turin"]);
   // rewards screen
   w.tab(4); w.say("Your farm"); w.say("2 animals live here"); w.say("Example: Geography");
+  // exam calendar: paste a timetable, click a day, add an exam, subjects appear in Questions
+  w.tab(5); w.say("Exam calendar"); w.say("Add an exam on this day");
+  w.typeInto(w.byPlaceholder("Maths Paper 1 | 14 May 2027 | GCSE | AQA | 9:00\nBiology | 21/05/2027 | Mock\nEnglish Literature, 3 June 2027"), "Maths Paper 1 | 14 May 2027 | GCSE | AQA | 9:00\nBiology | 21/05/2027 | Mock\nEnglish Literature, 3 June 2027\nnonsense");
+  w.btn("📷 Copy a prompt to turn a photo into a list").click(); await w.flush(); w.say("Give this to another AI along with your photo");
+  assert.ok(all(w.app, (e) => String(e.tagName).toLowerCase() === "details").every((d) => d.attrs.open !== undefined), "the paste box stays open after pressing its buttons");
+  w.btn("Check the list").click(); await w.flush(); w.say("Check these before adding (3)");
+  const examBoxes = all(w.app, (e) => e.tagName === "INPUT" && e.attrs.type === "checkbox" && String(e.attrs["aria-label"] || "").startsWith("Add "));
+  assert.equal(examBoxes.length, 3); examBoxes[2].checked = false; fire(examBoxes[2], "change");
+  w.btn("Add 2 exams").click(); await w.flush();
+  w.say("May 2027");
+  let local = JSON.parse(w.store.get("revise-app-v1"));
+  assert.equal(local.exams.length, 2, "the ticked-off exam was not added"); assert.equal(local.exams[0].board, "AQA");
+  assert.deepEqual(["Maths", "Biology"].filter((n) => !local.subjects.some((x) => x.name === n)), []);
+  const dayBtn = all(w.app, (e) => e.tagName === "BUTTON" && String(e.attrs["aria-label"] || "").includes("Maths exam"))[0];
+  assert.ok(dayBtn, "the calendar shows the Maths exam day"); dayBtn.click(); await w.flush();
+  w.say("Make past-paper style questions");
+  const future = new Date(); future.setDate(future.getDate() + 3);
+  w.typeInto(w.byPlaceholder("e.g. Maths"), "Physics");
+  w.btn("Today").click(); await w.flush(); w.typeInto(w.byPlaceholder("e.g. Maths"), "Physics"); w.btn("Add exam").click(); await w.flush();
+  local = JSON.parse(w.store.get("revise-app-v1"));
+  assert.equal(local.exams.length, 3); assert.ok(local.subjects.some((x) => x.name === "Physics"), "adding an exam creates the subject");
+  w.btn("Leave out of timetable").click(); await w.flush(); w.say("left out");
+  assert.equal(JSON.parse(w.store.get("revise-app-v1")).plan.exclude.length, 1);
+  w.tab(0); w.say("Coming up");
   w.tab(3); w.say("Weekly quests"); w.say("Chests"); w.say("Shop"); w.say("Real-life rewards"); w.say("Watch an episode (80)");
   w.btn("＋ Watch an episode (80)").click(); w.say("80 points");
   fire(w.nav.children[3], "click");
@@ -135,8 +159,16 @@ async function playRound(w, { wrongFirst = false } = {}) {
 {
   const fake = fakeSupabase();
   const aiCalls = [];
+  const checkCalls = [];
   let aiMode = "ok";
+  let checkMode = "yes";
   const fetchFn = async (url, init) => {
+    if (String(url).startsWith("/api/check")) {
+      checkCalls.push(JSON.parse(init.body));
+      assert.ok(init.headers.Authorization.startsWith("Bearer "), "AI check must carry the login token");
+      if (checkMode === "down") return new Response("{}", { status: 502 });
+      return new Response(JSON.stringify({ correct: checkMode === "yes", why: "test" }), { status: 200 });
+    }
     if (String(url).startsWith("/api/generate")) {
       aiCalls.push(JSON.parse(init.body));
       assert.ok(init.headers.Authorization.startsWith("Bearer "), "AI call must carry the login token");
@@ -161,7 +193,7 @@ async function playRound(w, { wrongFirst = false } = {}) {
   w.btn("Create account", 1).click(); await w.flush(); w.say("at least 6 characters");
   w.typeInto(pw()[0], "secret1"); w.typeInto(pw()[1], "secret1");
   w.btn("Create account", 1).click(); await w.flush();
-  w.say("Ready to revise?"); assert.equal(w.nav.children.length, 5); assert.ok(w.user.textContent.includes("jamie_t"), "shows the username, not the fake email");
+  w.say("Ready to revise?"); assert.equal(w.nav.children.length, 6); assert.ok(w.user.textContent.includes("jamie_t"), "shows the username, not the fake email");
   assert.equal(fake.rows.size, 1, "first save reached the cloud"); assert.ok(w.user.textContent.includes("Saved"));
   const userId = [...fake.users.values()][0].id;
 
@@ -192,7 +224,7 @@ async function playRound(w, { wrongFirst = false } = {}) {
   // AI questions: preview, untick, add
   w.tab(2); w.typeInto(w.byPlaceholder("e.g. Photosynthesis, or The causes of World War 1"), "Photosynthesis");
   w.btn("✨ Make questions for me").click(); await w.flush();
-  assert.equal(aiCalls.length, 1); assert.deepEqual([aiCalls[0].topic, aiCalls[0].level, aiCalls[0].count, aiCalls[0].style], ["Photosynthesis", "GCSE", 10, "mixed"]);
+  assert.equal(aiCalls.length, 2, "asks again when the AI writes fewer than requested, then stops when only repeats come back"); assert.equal(aiCalls[1].count, 7); assert.ok(aiCalls[1].avoid.length === 3); w.say("I managed 3 of the 10"); assert.deepEqual([aiCalls[0].topic, aiCalls[0].level, aiCalls[0].count, aiCalls[0].style], ["Photosynthesis", "GCSE", 10, "mixed"]);
   w.say("Check these before adding (3)"); w.say("Made by AI");
   const boxes = all(w.app, (e) => e.tagName === "INPUT" && e.attrs.type === "checkbox");
   boxes[2].checked = false; fire(boxes[2], "change");
@@ -248,6 +280,26 @@ async function playRound(w, { wrongFirst = false } = {}) {
   prevented = false; fire(w.brand, "click", { preventDefault() { prevented = true; } }); assert.ok(!prevented, "a normal tap still works");
   fire(w.brand, "pointerdown"); fire(w.brand, "pointerup"); await w.flush(); assert.equal(fake.rows.get(userId).data.stats.secrets, 1, "a short press does nothing");
   fire(w.brand, "pointerdown"); await w.flush(); assert.equal(fake.rows.get(userId).data.stats.secrets, 2); assert.equal(pts(), p0 + 10, "bonus is once a day");
+
+  // typed answers: a near miss goes to the AI; if it says yes it counts, and the exact answer is still shown
+  {
+    w.tab(1); if (w.buttons("Start").length) w.start(); // (a round from "Feed" may already be open)
+    const skipToTyped = () => { for (let g = 0; g < 40; g++) { const inp = all(w.app, (e) => e.tagName === "INPUT" && e.attrs.id === "answer")[0]; if (inp) return inp; const first = all(w.app, (e) => e.tagName === "BUTTON" && e.parent?.className === "choices")[0]; assert.ok(first, "no question on screen: " + w.app.textContent.slice(0, 200)); first.click(); (w.buttons("Finish").length ? w.btn("Finish") : w.btn("Next →")).click(); } assert.fail("no typed question found"); };
+    const typedQuestion = skipToTyped;
+    let inp = typedQuestion(); const qText = all(w.app, (e) => e.className === "quiz-q")[0].textContent; const right = fake.rows.get(userId).data.questions.find((x) => x.q === qText).a.split(";")[0].trim();
+    inp.value = right + "zq"; fire(inp, "keydown", { key: "Enter" }); await w.flush();
+    assert.equal(checkCalls.length, 1, "a near miss is sent to the AI"); assert.equal(checkCalls[0].answer, right + "zq");
+    w.say("Counts as correct!"); w.say("Exact answer:"); w.say(right);
+    w.btn("Next →").click();
+    checkMode = "no"; inp = typedQuestion(); inp.value = "qqqq"; fire(inp, "keydown", { key: "Enter" }); await w.flush();
+    assert.equal(checkCalls.length, 2); w.say("Not quite"); w.say("Answer:");
+    w.btn("Next →").click();
+    checkMode = "down"; inp = typedQuestion(); inp.value = "qqqq"; fire(inp, "keydown", { key: "Enter" }); await w.flush();
+    w.say("Not quite"); // the AI being unavailable never breaks the quiz
+    const n = checkCalls.length; w.btn("Next →").click();
+    checkMode = "yes"; inp = typedQuestion(); const q4 = all(w.app, (e) => e.className === "quiz-q")[0].textContent; inp.value = fake.rows.get(userId).data.questions.find((x) => x.q === q4).a.split(";")[0].trim(); fire(inp, "keydown", { key: "Enter" }); await w.flush();
+    assert.equal(checkCalls.length, n, "an answer our own matching accepts never goes to the AI");
+  }
 
   // a revoked session drops you back to the sign-in page without crashing
   fake.revokeAll(); fake.expireAll(); w.tab(2);

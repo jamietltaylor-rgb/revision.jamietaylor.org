@@ -325,3 +325,142 @@ test("the hidden surprise gives points once a day but counts every time", () => 
   assert.equal(L.sanitiseState({ lastParade: "2026-10-26", stats: { secrets: 3 } }).lastParade, "2026-10-26");
   assert.equal(L.sanitiseState({ lastParade: "nope" }).lastParade, "");
 });
+
+test("answers: other correct wordings are accepted, wrong ones are not", () => {
+  const ok = (g, e) => assert.ok(L.isCorrect(g, e), `${g} should match ${e}`);
+  const no = (g, e) => assert.ok(!L.isCorrect(g, e), `${g} should NOT match ${e}`);
+  ok("it is the mitochondria", "Mitochondria");
+  ok("seven continents", "7");
+  ok("two", "2");
+  ok("Pacific", "Pacific Ocean");
+  ok("severn", "River Severn");
+  ok("dioxide carbon", "carbon dioxide");
+  ok("water and carbon dioxide", "carbon dioxide and water");
+  ok("plants", "plant");
+  ok("cell membranes", "cell membrane");
+  ok("the french revolution", "French Revolution");
+  ok("carbon dioxide", "CO2; carbon dioxide");
+  no("not paris", "Paris");
+  no("7 or 8", "7");
+  no("17", "7");
+  no("carbon", "carbon dioxide");
+  no("henry", "Henry VIII");
+  no("2", "World War 2");
+  no("Atlantic", "Pacific Ocean");
+  no("Pacific Atlantic", "Pacific Ocean");
+});
+
+test("pasted JSON can carry alternative answers and a source tag", () => {
+  const r = L.parseQuestionList(JSON.stringify([{ q: "Formula for carbon dioxide?", a: "CO2", alt: ["carbon dioxide", "CO₂"], wrong: ["O2"], src: "AQA style" }]));
+  assert.equal(r.items[0].a, "CO2; carbon dioxide; CO₂");
+  assert.equal(r.items[0].src, "AQA style");
+  assert.ok(L.isCorrect("carbon dioxide", r.items[0].a));
+});
+
+test("past-paper prompt option", () => {
+  assert.ok(!/past-paper/.test(L.buildAiPrompt({ topic: "Cells" })));
+  const p = L.buildAiPrompt({ topic: "Cells", paper: true, board: "AQA", level: "GCSE" });
+  assert.match(p, /AQA/); assert.match(p, /past-paper/); assert.match(p, /Never make up/);
+});
+
+test("exam lists are read from the way people write timetables", () => {
+  const r = L.parseExamList("Maths Paper 1 | 14 May 2027 | GCSE | 9:00\nBiology, 21/05/2027, mock\nEnglish Lit - May 17th - A level\nrubbish\nHistory | 3rd June", "2027-04-26");
+  assert.equal(r.exams.length, 4); assert.equal(r.skipped, 1);
+  assert.deepEqual(r.exams[0], { subject: "Maths", kind: "GCSE", board: "", date: "2027-05-14", paper: "Paper 1", time: "9:00" });
+  assert.deepEqual([r.exams[1].subject, r.exams[1].kind, r.exams[1].date], ["Biology", "Mock", "2027-05-21"]);
+  assert.deepEqual([r.exams[2].subject, r.exams[2].kind, r.exams[2].date], ["English Lit", "A-level", "2027-05-17"]);
+  assert.equal(r.exams[3].date, "2027-06-03");
+  assert.equal(L.parseExamList("Maths | 30 Feb 2027", "2027-01-01").exams.length, 0, "impossible dates are skipped");
+  assert.equal(L.parseExamList("Maths | 3 Feb", "2027-03-01").exams[0].date, "2028-02-03", "a date without a year means the next one");
+});
+
+test("timetable: nearer exams get more time, nobody revises on their own exam day, rest days stay empty", () => {
+  const exams = [
+    { id: "1", subject: "Maths", kind: "GCSE", date: "2027-05-10", paper: "", time: "" },
+    { id: "2", subject: "History", kind: "GCSE", date: "2027-05-24", paper: "", time: "" },
+    { id: "3", subject: "Art", kind: "Mock", date: "2027-05-24", paper: "", time: "" },
+  ];
+  const t = L.buildTimetable(exams, { perDay: 2, minutes: 30, offDays: [6] }, "2027-04-26");
+  assert.equal(t[0].date, "2027-04-26"); assert.equal(t.at(-1).date, "2027-05-24");
+  for (const d of t) {
+    if (d.off) assert.equal(d.sessions.length, 0);
+    for (const s of d.sessions) assert.ok(!d.exams.some((e) => L.subjectKey(e.subject) === s.key), "no revision on exam day");
+    assert.ok(d.sessions.length <= 2);
+  }
+  assert.ok(t.find((d) => d.date === "2027-05-02").off, "Sunday is a rest day");
+  const week1 = t.slice(0, 7).flatMap((d) => d.sessions).reduce((m, s) => ({ ...m, [s.subject]: (m[s.subject] || 0) + 1 }), {});
+  assert.ok(week1.Maths > week1.Art, "the sooner exam gets more sessions");
+  assert.ok(week1.Art > 0 && week1.History > 0, "every subject appears in the first week");
+  assert.ok(L.buildTimetable([], {}, "2027-04-26").length === 0);
+  assert.ok(L.buildTimetable([{ ...exams[0], date: "2020-01-01" }], {}, "2027-04-26").length === 0, "finished exams are ignored");
+});
+
+test("exams and the plan survive saving and bad data is cleaned up", () => {
+  const s = L.sanitiseState({ exams: [{ id: "a", subject: "Maths", kind: "GCSE", date: "2027-05-14" }, { id: "b", subject: "x", date: "not a date" }, { id: "a", subject: "dup", date: "2027-05-14" }, { id: "c", subject: "Bio", kind: "weird", date: "2027-02-30" }],
+    plan: { perDay: 99, minutes: 1, offDays: [6, 6, "x", 9], done: { "2027-05-01|maths|0": true, "junk": true } } });
+  assert.equal(s.exams.length, 1); assert.equal(s.exams[0].subject, "Maths");
+  assert.deepEqual(s.plan, { perDay: 6, minutes: 10, offDays: [6], exclude: [], done: { "2027-05-01|maths|0": true } });
+  assert.deepEqual(L.sanitiseState({}).plan, { perDay: 2, minutes: 30, offDays: [], exclude: [], done: {} });
+  assert.equal(L.sanitiseState({ subjects: [{ id: "s", name: "S" }], questions: [{ id: "q", subjectId: "s", q: "Q?", a: "A", src: "AQA past-paper style" }] }).questions[0].src, "AQA past-paper style");
+});
+
+test("exam board in a pasted timetable", () => {
+  const r = L.parseExamList("Physics Paper 2 | 3 June 2027 | AQA | GCSE\nHistory | 4 June 2027 | pearson edexcel\nGeography | 5 June 2027 | wjec", "2027-04-26");
+  assert.deepEqual(r.exams.map((e) => [e.subject, e.board, e.kind]), [["Physics", "AQA", "GCSE"], ["History", "Edexcel", "Other"], ["Geography", "WJEC / Eduqas", "Other"]]);
+  assert.equal(L.sanitiseState({ exams: [{ id: "a", subject: "X", date: "2027-05-14", board: "AQA" }, { id: "b", subject: "Y", date: "2027-05-14", board: "Fake" }] }).exams.map((e) => e.board).join(","), "AQA,");
+});
+
+test("subjects can be left out of the revision timetable", () => {
+  const exams = [
+    { id: "1", subject: "Maths", kind: "GCSE", date: "2027-05-10", paper: "", time: "" },
+    { id: "2", subject: "Art", kind: "GCSE", date: "2027-05-12", paper: "", time: "" },
+  ];
+  const t = L.buildTimetable(exams, { perDay: 2, exclude: ["art"] }, "2027-04-26");
+  const subjects = new Set(t.flatMap((d) => d.sessions.map((s) => s.subject)));
+  assert.deepEqual([...subjects], ["Maths"]);
+  assert.ok(t.find((d) => d.date === "2027-05-12").exams.length === 1, "the exam still shows on the calendar");
+  assert.equal(L.buildTimetable(exams, { exclude: ["Maths", "ART"] }, "2027-04-26").flatMap((d) => d.sessions).length, 0);
+  assert.deepEqual(L.sanitiseState({ plan: { exclude: ["Art", "Art", "", 5] } }).plan.exclude, ["Art"]);
+});
+
+test("complete exam questions: parsed with marks, kept when saved, prompt asks for a mark scheme", () => {
+  const r = L.parseQuestionList(JSON.stringify([{ q: "Explain why plants need light. [4 marks]", marks: 4, a: "for photosynthesis ; to make glucose ; chlorophyll absorbs light ; energy is transferred" }, { q: "Quick one?", a: "Yes" }]));
+  assert.equal(r.items[0].exam, true); assert.equal(r.items[0].marks, 4); assert.deepEqual(r.items[0].choices, []);
+  assert.equal(r.items[1].exam, undefined);
+  const s = L.sanitiseState({ subjects: [{ id: "s", name: "Bio – Exam questions" }], questions: [{ id: "q", subjectId: "s", q: "Explain.", a: "x ; y ; ".padEnd(900, "z"), exam: true, marks: 40 }, { id: "q2", subjectId: "s", q: "Q?", a: "A", exam: true, marks: 0 }] });
+  assert.equal(s.questions[0].exam, true); assert.equal(s.questions[0].marks, 12); assert.ok(s.questions[0].a.length > 300, "mark schemes can be long");
+  assert.equal(s.questions[1].exam, undefined, "an exam question needs marks");
+  const p = L.buildAiPrompt({ topic: "Cells", mode: "exam", board: "OCR", paper: true });
+  assert.match(p, /mark scheme/); assert.match(p, /"marks"/); assert.match(p, /OCR specification/);
+  assert.match(L.buildAiPrompt({ topic: "Cells", board: "AQA" }), /AQA specification/);
+  assert.doesNotMatch(L.buildAiPrompt({ topic: "Cells" }), /specification/);
+  assert.equal(L.sanitiseState({ settings: { board: "AQA" } }).settings.board, "AQA");
+  assert.equal(L.sanitiseState({ settings: { board: "Nope" } }).settings.board, "");
+});
+
+test("offline marker scores each marking point", () => {
+  const scheme = "for photosynthesis ; to make glucose ; chlorophyll absorbs light ; energy is transferred";
+  const full = L.markLocally("Plants need light for photosynthesis, to make glucose. Chlorophyll absorbs the light and energy is transferred.", scheme, 4);
+  assert.equal(full.awarded, 4); assert.equal(full.total, 4);
+  const part = L.markLocally("They use light to do photosynthesis and make glucose", scheme, 4);
+  assert.equal(part.awarded, 2); assert.deepEqual(part.points.map((p) => p.met), [true, true, false, false]);
+  assert.equal(L.markLocally("I like cheese", scheme, 4).awarded, 0);
+  assert.equal(L.markLocally("photosynthesis glucose chlorophyll light energy transferred", scheme, 2).awarded, 2, "never more than the marks available");
+  assert.deepEqual(L.schemePoints("a ; b • c\nd"), ["a", "b", "c", "d"]);
+});
+
+test("a timetable typed out by another AI (tables, numbering, weekdays, code fences) is understood", () => {
+  const reply = "```\n| Subject | Date | Type |\n|---|---|---|\n| Maths | Mon 14 May 2027 | GCSE |\n```\n1. Biology | Fri 21/05/2027 | Mock | AQA | Paper 2 | 9:00\n- English Language | Tuesday 25 May 2027";
+  const r = L.parseExamList(reply, "2027-04-26");
+  assert.deepEqual(r.exams.map((e) => [e.subject, e.date, e.kind, e.board, e.paper, e.time]), [
+    ["Maths", "2027-05-14", "GCSE", "", "", ""],
+    ["Biology", "2027-05-21", "Mock", "AQA", "Paper 2", "9:00"],
+    ["English Language", "2027-05-25", "Other", "", "", ""],
+  ]);
+});
+
+test("prompt for turning a photo of a timetable into a list", () => {
+  const p = L.buildTimetablePrompt("2026-11-02");
+  assert.match(p, /photo/); assert.match(p, /Subject \| date \| type \| exam board \| paper \| time/); assert.match(p, /2026-11-02/); assert.match(p, /14 May 2026/);
+  assert.equal(L.parseExamList(p.split("\n").find((l) => /^Subject \|/.test(l)).replace("Subject | date | type | exam board | paper | time", "Maths | 14 May 2027 | GCSE | AQA | Paper 1 | 9:00"), "2027-01-01").exams[0].board, "AQA");
+});
