@@ -164,13 +164,14 @@ async function playRound(w, { wrongFirst = false } = {}) {
   let aiMode = "ok";
   let checkMode = "yes";
   const photoCalls = [];
+  let photoRaw = "";
   let photoReply = "Maths Paper 1 | 14 May 2027 | GCSE | AQA | 9:00\nBiology | 21 May 2027 | GCSE\nChemistry | 25 May 2027 | GCSE";
   const fetchFn = async (url, init) => {
     if (String(url).startsWith("/api/timetable")) {
       photoCalls.push(JSON.parse(init.body));
       assert.ok(init.headers.Authorization.startsWith("Bearer "), "photo reading must carry the login token");
       if (!photoReply) return new Response(JSON.stringify({ error: "I couldn't read any exams from that photo." }), { status: 502 });
-      return new Response(JSON.stringify({ text: photoReply }), { status: 200 });
+      return new Response(JSON.stringify({ text: photoReply, ...(photoRaw ? { raw: photoRaw } : {}) }), { status: 200 });
     }
     if (String(url).startsWith("/api/check")) {
       checkCalls.push(JSON.parse(init.body));
@@ -337,6 +338,14 @@ async function playRound(w, { wrongFirst = false } = {}) {
     const pick4 = all(w.app, (e) => e.tagName === "INPUT" && e.attrs.type === "file")[0];
     pick4.files = [{ type: "application/pdf", name: "timetable.pdf" }]; fire(pick4, "change", { target: pick4 }); await w.flush();
     assert.equal(photoCalls.length, 3); assert.equal(photoCalls[2].image, "data:application/pdf;base64,JVBERi0xLjQK", "PDF sent with the right type"); w.say("Check these before adding (1)");
+  }
+
+  // a PDF whose AI list has no readable dates falls back to the PDF's own text, which lists dates as headings
+  {
+    photoReply = "Maths Paper 1"; photoRaw = "Monday 9th November\nAM Maths Paper 1 (9:00)\nPM English Paper 1";
+    const pk = all(w.app, (e) => e.tagName === "INPUT" && e.attrs.type === "file")[0];
+    pk.files = [{ type: "application/pdf", name: "mocks.pdf" }]; fire(pk, "change", { target: pk }); await w.flush();
+    w.say("Check these before adding (2)"); w.say("English"); w.btn("Cancel").click(); photoRaw = "";
   }
 
   // pasted text in any layout: the AI sorts it out; a tidy list is read on the spot; if the AI is down we still try

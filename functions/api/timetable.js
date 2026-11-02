@@ -115,18 +115,18 @@ async function readPdf(env, req, prompt) {
     return json(502, { error: "I couldn't open that PDF. Try a screenshot of the timetable instead." });
   }
   if (text.replace(/[^\p{L}\p{N}]/gu, "").length < 30) return json(422, { error: "That PDF has no readable text (it may be a scan). Take a photo or screenshot of the timetable instead." });
-  return writeList(env, text, prompt, "pdf");
+  return writeList(env, text, prompt, "pdf", text);
 }
 
 /** Turns timetable text in any layout into one-exam-per-line text. */
-async function writeList(env, text, prompt, source) {
+async function writeList(env, text, prompt, source, raw) {
   let lastError = "";
   for (const model of [TEXT_MODEL, MODELS[0]]) {
     try {
       const out = await env.AI.run(model, { messages: [{ role: "system", content: "You turn exam timetable text into plain text lists. You reply with only the list." }, { role: "user", content: pdfPrompt(prompt, text) }], max_tokens: 1500, temperature: 0.1 });
       const lines = cleanReply(out && out.response !== undefined ? out.response : out);
       if (!lines) { lastError = "I couldn't find any exams in that text."; continue; }
-      return json(200, { text: lines, model, source });
+      return json(200, { text: lines, model, source, ...(raw ? { raw } : {}) });
     } catch (e) {
       lastError = /limit|quota|capacity|neurons/i.test(String(e && e.message)) ? "The free daily AI allowance is used up." : "The reader had a problem.";
     }

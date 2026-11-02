@@ -59,7 +59,7 @@ test("PDFs: text is pulled out with toMarkdown, then a text model writes the lis
   stubAuth(); let conv = null, seen = null;
   const ai = { toMarkdown: async (f) => { conv = f; return [{ name: "timetable.pdf", format: "markdown", data: pdfText }]; }, run: async (m, i) => { seen = { m, i }; return { response: "Maths Paper 1 | 12 January 2027 | Mock | | | 9:00\nEnglish Language Paper 1 | 13 January 2027 | Mock | | | 9:00" }; } };
   const r = await call(post(pdf), env(ai));
-  assert.equal(r.status, 200); assert.equal(r.body.source, "pdf");
+  assert.equal(r.status, 200); assert.equal(r.body.source, "pdf"); assert.equal(r.body.raw, pdfText, "the PDF's own text comes back too, as a backup");
   assert.match(r.body.text, /^Maths Paper 1 \| 12 January 2027/);
   assert.equal(conv.name, "timetable.pdf"); assert.equal(conv.blob.type, "application/pdf"); assert.equal(conv.blob.size, 9, "bytes decoded from base64");
   assert.match(seen.m, /llama-3\.3-70b/);

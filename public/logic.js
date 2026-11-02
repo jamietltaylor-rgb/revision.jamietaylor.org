@@ -777,42 +777,65 @@ export function findDate(text, today) {
 const PAPER_RE = /\b(paper\s*\d+[a-z]?|unit\s*\d+[a-z]?|component\s*\d+|p\d\b)/i;
 const TIME_RE = /\b(\d{1,2}[:.]\d{2}\s*(?:am|pm)?|\d{1,2}\s*(?:am|pm))\b/i;
 
+const NOT_A_SUBJECT = /^(week\s*[a-z0-9]+|day\s*\d+|am|pm|morning|afternoon|session|exam|exams|date|time|subject|paper|room|hall)$/i;
+const NOT_AN_EXAM_LINE = /^(good luck|please|bring|note|notes|remember|break|lunch|registration|equipment|calculators?|you must|students|all |page \d|©)/i;
+
+/** Turns one line (with its date) into an exam, or null when there's no subject on it. */
+function examFromLine(line, date, today, session = "") {
+  const { rest } = findDate(line, today);
+  let remaining = rest.replace(/\b(mon|tue|tues|wed|thu|thur|thurs|fri|sat|sun)(?:day|sday|nesday|rsday|urday)?\b\.?/gi, " ").replace(/^\||\|$/g, " ");
+  let time = "";
+  const tm = remaining.match(TIME_RE);
+  if (tm) { time = tm[1].replace(/\s+/g, "").replace(".", ":"); remaining = remaining.replace(tm[0], " "); }
+  const parts = remaining.split(/\||\t|;|\s[–—-]\s|,/).map((p) => clean(p)).filter(Boolean);
+  let kind = "Other";
+  let board = "";
+  const kept = [];
+  for (const p of parts) {
+    const bm = /^(aqa|edexcel|pearson(?:\s+edexcel)?|ocr|wjec(?:\s*\/\s*eduqas)?|eduqas|ccea|sqa)$/i.exec(p);
+    if (bm) { const w = bm[1].toLowerCase(); board = w.startsWith("wjec") || w === "eduqas" ? "WJEC / Eduqas" : w.includes("edexcel") || w.startsWith("pearson") ? "Edexcel" : w.toUpperCase(); continue; }
+    const k = /^(mock|gcse|a[\s-]?level|as[\s-]?level|other)s?(\s+exams?)?$/i.exec(p);
+    if (k) { const w = k[1].toLowerCase().replace(/[\s-]/g, ""); kind = w === "mock" ? "Mock" : w === "gcse" ? "GCSE" : w === "alevel" ? "A-level" : w === "aslevel" ? "AS-level" : "Other"; }
+    else if (!NOT_A_SUBJECT.test(p)) kept.push(p);
+  }
+  let subject = kept[0] || "";
+  let paper = "";
+  const pm = subject.match(PAPER_RE) || kept.slice(1).join(" ").match(PAPER_RE);
+  if (pm) { paper = pm[1].replace(/\s+/g, " "); subject = subject.replace(pm[0], " "); }
+  subject = clean(subject.replace(/\b(mock|gcse|a[\s-]?level|as[\s-]?level)\b/gi, " ").replace(/\(\s*\)|\[\s*\]/g, " ").replace(/^[-:(\[\s]+|[-:(\[\s]+$/g, "")).slice(0, 60);
+  if (!subject) return null;
+  return { subject, kind, board, date, paper: paper.slice(0, 40), time: (time || session).slice(0, 20) };
+}
+
 /**
- * Reads a pasted exam timetable, one exam per line, e.g.
- *   Maths Paper 1 | 14 May 2027 | GCSE | 9:00
- *   Biology, 21/05/2027, mock
+ * Reads a pasted exam timetable. Two layouts work:
+ *   one exam per line:   Maths Paper 1 | 14 May 2027 | GCSE | 9:00     or   Biology, 21/05/2027, mock
+ *   dates as headings:   Monday 9th November
+ *                        AM  Maths Paper 1 (9:00)
+ *                        PM  English Language Paper 1
  */
 export function parseExamList(text, today) {
   const exams = [];
   let skipped = 0;
+  let heading = ""; // the date from the latest "Monday 9th November" line that had no exam on it
   const cleaned = String(text ?? "").replace(/^```[a-z]*\s*$/gim, "");
-  for (const raw of cleaned.split(/\r?\n/).slice(0, 300)) {
+  for (const raw of cleaned.split(/\r?\n/).slice(0, 400)) {
     const line = stripNumber(raw.trim());
     if (!line || /^[|\s:-]+$/.test(line)) continue;
-    const { date, rest } = findDate(line, today);
-    if (!date) { skipped++; continue; }
-    let remaining = rest.replace(/\b(mon|tue|tues|wed|thu|thur|thurs|fri|sat|sun)(?:day|sday|nesday|rsday|urday)?\b\.?/gi, " ").replace(/^\||\|$/g, " ");
-    let time = "";
-    const tm = remaining.match(TIME_RE);
-    if (tm) { time = tm[1].replace(/\s+/g, "").replace(".", ":"); remaining = remaining.replace(tm[0], " "); }
-    const parts = remaining.split(/\||\t|;|\s[–—-]\s|,/).map((p) => clean(p)).filter(Boolean);
-    let kind = "Other";
-    let board = "";
-    const kept = [];
-    for (const p of parts) {
-      const bm = /^(aqa|edexcel|pearson(?:\s+edexcel)?|ocr|wjec(?:\s*\/\s*eduqas)?|eduqas|ccea|sqa)$/i.exec(p);
-      if (bm) { const w = bm[1].toLowerCase(); board = w.startsWith("wjec") || w === "eduqas" ? "WJEC / Eduqas" : w.includes("edexcel") || w.startsWith("pearson") ? "Edexcel" : w.toUpperCase(); continue; }
-      const k = /^(mock|gcse|a[\s-]?level|as[\s-]?level|other)s?(\s+exams?)?$/i.exec(p);
-      if (k) { const w = k[1].toLowerCase().replace(/[\s-]/g, ""); kind = w === "mock" ? "Mock" : w === "gcse" ? "GCSE" : w === "alevel" ? "A-level" : w === "aslevel" ? "AS-level" : "Other"; }
-      else kept.push(p);
+    const { date } = findDate(line, today);
+    if (date) {
+      const exam = examFromLine(line, date, today);
+      if (exam) exams.push(exam);
+      else heading = date; // a date on its own: the exams that follow are on this day
+      continue;
     }
-    let subject = kept[0] || "";
-    let paper = "";
-    const pm = subject.match(PAPER_RE) || kept.slice(1).join(" ").match(PAPER_RE);
-    if (pm) { paper = pm[1].replace(/\s+/g, " "); subject = subject.replace(pm[0], " "); }
-    subject = clean(subject.replace(/\b(mock|gcse|a[\s-]?level|as[\s-]?level)\b/gi, " ").replace(/^[-:]+|[-:]+$/g, "")).slice(0, 60);
-    if (!subject) { skipped++; continue; }
-    exams.push({ subject, kind, board, date, paper: paper.slice(0, 40), time: time.slice(0, 20) });
+    if (heading && line.length <= 90 && !NOT_AN_EXAM_LINE.test(line)) {
+      const sm = /^(am|pm|morning|afternoon)\b\s*[:\-–—]?\s*/i.exec(line);
+      const session = sm ? (/^(am|morning)/i.test(sm[1]) ? "AM" : "PM") : "";
+      const exam = examFromLine(sm ? line.slice(sm[0].length) : line, heading, today, session);
+      if (exam) { exams.push(exam); continue; }
+    }
+    skipped++;
   }
   return { exams: exams.slice(0, 150), skipped };
 }

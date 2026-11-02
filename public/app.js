@@ -372,7 +372,10 @@ async function readTimetablePhoto(file) {
     const r = await cloud.readTimetable({ image, today: today() });
     planUI.paste = r.text;
     planUI.reading = false;
-    if (showExamPreview(L.parseExamList(planUI.paste, today()))) toast("Read it ✓ — check the dates match your timetable before adding");
+    let found = L.parseExamList(planUI.paste, today());
+    // if the AI's list has no dates we can read, try the PDF's own text (it may list dates as headings)
+    if (!found.exams.length && r.raw) { const own = L.parseExamList(r.raw, today()); if (own.exams.length) { found = own; planUI.paste = r.raw.slice(0, 6000); } }
+    if (showExamPreview(found)) toast("Read it ✓ — check the dates match your timetable before adding");
   } catch (e) {
     toast(e && e.message ? e.message : "I couldn't read that photo.");
   }

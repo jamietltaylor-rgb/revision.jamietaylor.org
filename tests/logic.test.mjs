@@ -464,3 +464,30 @@ test("prompt for turning a photo of a timetable into a list", () => {
   assert.match(p, /photo/); assert.match(p, /Subject \| date \| type \| exam board \| paper \| time/); assert.match(p, /2026-11-02/); assert.match(p, /14 May 2026/);
   assert.equal(L.parseExamList(p.split("\n").find((l) => /^Subject \|/.test(l)).replace("Subject | date | type | exam board | paper | time", "Maths | 14 May 2027 | GCSE | AQA | Paper 1 | 9:00"), "2027-01-01").exams[0].board, "AQA");
 });
+
+test("parseExamList reads timetables laid out with a date heading and the exams underneath", () => {
+  const text = `Year 11 Mock Exams - November 2026
+Monday 9th November
+AM  Maths Paper 1 (9:00)
+PM  English Language Paper 1 1:00pm
+Tuesday 10th November
+Biology Paper 1
+Chemistry Paper 1 - Hall
+Good luck everyone!
+Wednesday 11th November
+Week 1`;
+  const r = L.parseExamList(text, "2026-11-02");
+  assert.deepEqual(r.exams.map((e) => [e.subject, e.paper, e.date, e.time]), [
+    ["Maths", "Paper 1", "2026-11-09", "9:00"],
+    ["English Language", "Paper 1", "2026-11-09", "1:00pm"],
+    ["Biology", "Paper 1", "2026-11-10", ""],
+    ["Chemistry", "Paper 1", "2026-11-10", ""],
+  ]);
+  assert.equal(r.skipped, 3, "the title, the sign-off and the stray 'Week 1' are skipped");
+  // sessions without a time are marked AM / PM, and a lone heading with nothing under it adds nothing
+  const am = L.parseExamList("Thursday 12th November\nAM: History\nPM - Geography\nFriday 13th November", "2026-11-02");
+  assert.deepEqual(am.exams.map((e) => [e.subject, e.time]), [["History", "AM"], ["Geography", "PM"]]);
+  // ordinary one-per-line lists are unaffected, and lines before any date heading are never given a date
+  assert.equal(L.parseExamList("Intro line\nRE | 17 June 2027 | GCSE", "2026-11-02").exams.length, 1);
+  assert.equal(L.parseExamList("Maths\nEnglish", "2026-11-02").exams.length, 0);
+});
