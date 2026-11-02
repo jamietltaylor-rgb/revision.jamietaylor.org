@@ -868,3 +868,24 @@ export function buildTimetable(exams, plan, today, maxDays = 60) {
   }
   return days;
 }
+
+// ---------- marking complete exam answers ----------
+const MARK_STOP = new Set(["for", "to", "with", "from", "they", "their", "them", "can", "which", "when", "that", "then", "has", "have", "had", "will", "also", "into", "onto", "because", "so", "if", "or", "but"]);
+export const schemePoints = (scheme) => String(scheme ?? "").split(/\s*[;•\n]\s*/).map(clean).filter(Boolean);
+
+/**
+ * A simple marker that works offline: each marking point scores if most of its key words appear in the answer.
+ * Returns { awarded, total, points: [{ text, met }] }.
+ */
+export function markLocally(answer, scheme, marks) {
+  const points = schemePoints(scheme);
+  const given = answerTokens(answer);
+  const results = points.map((text) => {
+    const exp = answerTokens(text).filter((w) => (w.length > 2 || isNumeric(w)) && !MARK_STOP.has(w));
+    if (!exp.length) return { text, met: false };
+    const { matched } = alignTokens(exp, given);
+    return { text, met: matched >= Math.max(1, Math.ceil(exp.length * 0.5)) };
+  });
+  const total = Math.max(1, Math.min(12, Math.round(Number(marks)) || points.length || 1));
+  return { awarded: Math.min(total, results.filter((r) => r.met).length), total, points: results };
+}

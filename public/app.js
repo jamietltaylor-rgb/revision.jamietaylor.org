@@ -731,18 +731,23 @@ function viewQuestion() {
     if (session.stage === "ask") {
       const box = h("textarea", { id: "answer", maxlength: 2000, style: "min-height:8rem", placeholder: "Write your answer here (or think it through), then check the mark scheme", "aria-label": "Your answer" });
       body.append(box, h("div", { class: "row", style: "margin-top:.7rem" },
-        h("button", { class: "primary", onclick: () => showScheme(box.value) }, "Show mark scheme"),
-        h("button", { class: "ghost", onclick: () => showScheme("") }, "I don't know")));
+        h("button", { class: "primary", onclick: () => submitExam(box.value) }, "Mark my answer"),
+        h("button", { class: "ghost", onclick: () => submitExam("") }, "I don't know")));
       setTimeout(() => box.focus(), 0);
+    } else if (session.stage === "marking") {
+      body.append(h("p", { class: "verdict", role: "status" }, "⏳ Marking your answer…"));
     } else {
-      const points = q.a.split(/\s*[;•]\s*/).filter(Boolean);
-      body.append(h("div", { class: "verdict", role: "status" }, "Mark scheme",
+      const r = session.result || L.markLocally(session.given, q.a, q.marks);
+      const passed = r.total > 0 && r.awarded / r.total >= 0.5;
+      body.append(h("div", { class: "verdict " + (passed ? "good" : "bad"), role: "status" },
+        `${passed ? "✅" : "❌"} ${r.awarded} out of ${r.total} mark${r.total === 1 ? "" : "s"}`,
         session.given && h("span", { class: "ans" }, `You wrote: ${session.given}`)),
-        h("ul", { style: "margin:.6rem 0 .6rem 1.1rem;padding:0" }, points.map((x) => h("li", {}, x))),
-        h("p", { class: "small muted" }, `Mark yourself honestly: would you have got most of the ${q.marks} mark${q.marks === 1 ? "" : "s"}?`),
+        h("ul", { style: "list-style:none;margin:.6rem 0;padding:0" }, r.points.map((x) => h("li", { style: "padding:.15rem 0" }, `${x.met ? "✅" : "❌"} ${x.text}`))),
+        r.feedback && h("p", {}, r.feedback),
+        h("p", { class: "small muted" }, r.source === "ai" ? "Marked by AI — it's a good guide but not perfect." : r.source === "local" ? "Marked by matching key words (the AI marker wasn't available), so it can miss answers worded differently." : "Here is the mark scheme."),
         h("div", { class: "row" },
-          h("button", { class: "primary", onclick: () => commit(true) }, "Got most of the marks ✔"),
-          h("button", { onclick: () => commit(false) }, "Not yet ✗")));
+          h("button", { class: "primary", onclick: () => commit(passed) }, "Next →"),
+          session.given && h("button", { class: "ghost small", onclick: () => commit(!passed) }, passed ? "I disagree — count it as not yet" : "I disagree — count it as right")));
     }
     return h("section", { class: "card" }, head, body);
   }
@@ -774,10 +779,30 @@ function viewQuestion() {
   return h("section", { class: "card" }, head, body);
 }
 
-function showScheme(written) {
+async function submitExam(written) {
+  const q = currentQuestion();
+  if (!q || !session) return;
+  const given = String(written || "").trim();
   session.verdict = false;
-  session.given = String(written || "").trim();
-  session.dontKnow = !session.given;
+  session.given = given;
+  session.dontKnow = !given;
+  if (!given) {
+    session.result = { awarded: 0, total: q.marks, points: L.schemePoints(q.a).map((text) => ({ text, met: false })), feedback: "", source: "none" };
+    session.stage = "feedback";
+    return render();
+  }
+  session.stage = "marking";
+  render();
+  const at = session.index;
+  let result;
+  try {
+    if (!cloud.signedIn) throw new Error("local");
+    result = { ...(await cloud.markAnswer({ q: q.q, a: q.a, marks: q.marks, answer: given })), source: "ai" };
+  } catch {
+    result = { ...L.markLocally(given, q.a, q.marks), feedback: "", source: "local" };
+  }
+  if (!session || session.index !== at || session.stage !== "marking") return;
+  session.result = result;
   session.stage = "feedback";
   render();
 }
@@ -843,6 +868,7 @@ function commit(correct) {
   session.verdict = false;
   session.given = "";
   session.dontKnow = false;
+  session.result = null;
   if (session.index >= session.queue.length) finishSession();
   save();
   render();
