@@ -253,7 +253,7 @@ function checkBadges() {
 }
 
 // ======================= PLAN (calendar of exams + revision timetable) =======================
-const planUI = { month: "", selected: "", subject: "", board: "Any exam board", kind: "GCSE", paper: "", time: "", paste: "", preview: null, pasteOpen: false, prompt: "", shown: 14, reading: false };
+const planUI = { month: "", selected: "", subject: "", board: "Any exam board", kind: "GCSE", paper: "", time: "", paste: "", preview: null, pasteOpen: false, prompt: "", shown: 14 };
 const DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const longDate = (date) => new Date(`${date}T12:00:00`).toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" });
 const monthTitle = (m) => new Date(`${m}-01T12:00:00`).toLocaleDateString("en-GB", { month: "long", year: "numeric" });
@@ -286,9 +286,9 @@ function addExam(date) {
   toast(created ? `Exam added ✓ — and “${subject}” is now a subject in Questions` : "Exam added ✓");
   render();
 }
-/** Shows the "check these before adding" list for already-parsed exams. Returns false if there were none. */
-function showExamPreview(r) {
-  if (!r.exams.length) { toast("I couldn't find any dates in that. Try pasting the part of your timetable that lists the exams and their dates."); return false; }
+function checkExams() {
+  const r = L.parseExamList(planUI.paste, today());
+  if (!r.exams.length) return toast("I couldn't find any dates in that. Try one exam per line, like:  Maths Paper 1 | 14 May 2027 | GCSE");
   const have = new Set(state.exams.map((e) => `${L.subjectKey(e.subject)}|${e.date}|${e.paper}`));
   planUI.pasteOpen = true;
   planUI.preview = { skipped: r.skipped, items: r.exams.map((e) => {
@@ -297,89 +297,6 @@ function showExamPreview(r) {
     have.add(k);
     return { ...e, note, keep: !note };
   }) };
-  render();
-  return true;
-}
-/** Reads whatever was pasted. Tidy one-per-line lists are read on the spot; anything else goes to the AI. */
-async function checkExams() {
-  const local = L.parseExamList(planUI.paste, today());
-  const tidy = local.exams.length > 0 && local.skipped === 0;
-  if (tidy || !cloud.signedIn || planUI.paste.trim().length < 8) {
-    if (!tidy && !cloud.signedIn && planUI.paste.trim()) toast("Sign in and the AI can read any layout. For now I'll look for lines with a date.");
-    return showExamPreview(local);
-  }
-  planUI.reading = true;
-  planUI.pasteOpen = true;
-  render();
-  let ok = false;
-  try {
-    const r = await cloud.readTimetable({ text: planUI.paste, today: today() });
-    const fromAi = L.parseExamList(r.text, today());
-    ok = true;
-    planUI.reading = false;
-    if (fromAi.exams.length) { showExamPreview(fromAi); toast("Sorted it out ✓ — check the dates match your timetable before adding"); return true; }
-  } catch (e) {
-    toast(e && e.message ? `${e.message} Trying to read it without the AI…` : "The AI couldn't read that. Trying without it…");
-  }
-  planUI.reading = false;
-  if (ok) toast("The AI couldn't find any exams in that.");
-  return showExamPreview(local);
-}
-/** Shrinks a photo so it uploads quickly and the AI can still read the small print. */
-function prepareImage(file) {
-  return new Promise((resolve, reject) => {
-    const isPdf = file.type === "application/pdf" || /\.pdf$/i.test(String(file.name || ""));
-    if (!isPdf && !/^image\//.test(String(file.type || ""))) return reject(new Error("That isn't a picture or PDF. Choose a photo, screenshot or PDF."));
-    const reader = new FileReader();
-    reader.onerror = () => reject(new Error("I couldn't open that file."));
-    reader.onload = () => {
-      const src = String(reader.result);
-      if (isPdf) {
-        if (src.length > 3_900_000) return reject(new Error("That PDF is too big (over about 3 MB). Try a PDF of just the timetable page, or a screenshot."));
-        return resolve(src.replace(/^data:[^;,]*;/, "data:application/pdf;"));
-      }
-      const img = new Image();
-      img.onerror = () => reject(new Error("I couldn't read that picture. Try a JPEG or PNG."));
-      img.onload = () => {
-        try {
-          const scale = Math.min(1, 1800 / Math.max(img.width, img.height, 1));
-          const canvas = document.createElement("canvas");
-          canvas.width = Math.max(1, Math.round(img.width * scale));
-          canvas.height = Math.max(1, Math.round(img.height * scale));
-          const ctx = canvas.getContext("2d");
-          ctx.fillStyle = "#fff";
-          ctx.fillRect(0, 0, canvas.width, canvas.height);
-          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-          resolve(canvas.toDataURL("image/jpeg", 0.85));
-        } catch {
-          if (src.length <= 3_500_000 && /^data:image\/(jpeg|png|webp);base64,/.test(src)) resolve(src);
-          else reject(new Error("That picture is too big. Try a smaller or cropped one."));
-        }
-      };
-      img.src = src;
-    };
-    reader.readAsDataURL(file);
-  });
-}
-async function readTimetablePhoto(file) {
-  if (!file) return;
-  planUI.pasteOpen = true;
-  if (!cloud.signedIn) { toast("Sign in first — the AI needs your login to read a photo or PDF."); return render(); }
-  planUI.reading = true;
-  render();
-  try {
-    const image = await prepareImage(file);
-    const r = await cloud.readTimetable({ image, today: today() });
-    planUI.paste = r.text;
-    planUI.reading = false;
-    let found = L.parseExamList(planUI.paste, today());
-    // if the AI's list has no dates we can read, try the PDF's own text (it may list dates as headings)
-    if (!found.exams.length && r.raw) { const own = L.parseExamList(r.raw, today()); if (own.exams.length) { found = own; planUI.paste = r.raw.slice(0, 6000); } }
-    if (showExamPreview(found)) toast("Read it ✓ — check the dates match your timetable before adding");
-  } catch (e) {
-    toast(e && e.message ? e.message : "I couldn't read that photo.");
-  }
-  planUI.reading = false;
   render();
 }
 async function copyTimetablePrompt() {
@@ -634,19 +551,14 @@ function viewPlan() {
 
   // ----- list view, paste import -----
   const shown = table.slice(0, planUI.shown);
-  const photoPick = h("input", { type: "file", accept: "image/*,application/pdf,.pdf", "aria-label": "Photo or PDF of your exam timetable", style: "position:absolute;width:1px;height:1px;opacity:0;pointer-events:none", tabindex: "-1",
-    onchange: (e) => { const f = e.target.files && e.target.files[0]; e.target.value = ""; readTimetablePhoto(f); } });
   const listCard = h("section", { class: "card" },
     h("details", { open: planUI.pasteOpen || !!planUI.preview, ontoggle: (e) => { planUI.pasteOpen = e.target.open; } },
       h("summary", { style: "cursor:pointer;font-weight:700" }, `Paste a whole timetable, or see everything as a list (${upcoming.length} exam${upcoming.length === 1 ? "" : "s"})`),
-      h("p", { class: "muted small", style: "margin:.6rem 0" }, cloud.signedIn ? "Paste your timetable in any layout — copied from an email, a school website, a table or a PDF. The AI sorts it into exams and you check them before they're added." : "Paste one exam per line — subject, date, and optionally the exam board, type, paper and time. (Sign in and the AI can read any layout.) Dates like 14 May 2027, 14/05/2027 or 2027-05-14 all work."),
+      h("p", { class: "muted small", style: "margin:.6rem 0" }, "One exam per line — subject, date, and optionally the exam board, type, paper and time. Dates like 14 May 2027, 14/05/2027 or 2027-05-14 all work."),
       h("textarea", { "aria-label": "Exam timetable to paste", style: "min-height:7rem", placeholder: "Maths Paper 1 | 14 May 2027 | GCSE | AQA | 9:00\nBiology | 21/05/2027 | Mock\nEnglish Literature, 3 June 2027", oninput: (e) => { planUI.paste = e.target.value; } }, planUI.paste),
       h("div", { class: "row", style: "margin:.6rem 0" },
-        h("button", { disabled: planUI.reading, onclick: checkExams }, planUI.reading ? "⏳ Working it out…" : "Check the list"),
-        h("button", { class: "primary", disabled: planUI.reading, onclick: () => photoPick.click() }, planUI.reading ? "⏳ Reading your timetable…" : "📷 Read a photo or PDF of my timetable"),
-        photoPick),
-      h("p", { class: "small muted", style: "margin:0 0 .6rem" }, cloud.signedIn ? "Choose a clear photo, screenshot or PDF of your timetable and the AI will turn it into a list for you to check." : "Sign in to let the AI read a photo or PDF of your timetable for you."),
-      h("div", { class: "row", style: "margin:0 0 .6rem" }, h("button", { class: "ghost small", onclick: copyTimetablePrompt }, "Or copy a prompt to use with another AI")),
+        h("button", { onclick: checkExams }, "Check the list"),
+        h("button", { onclick: copyTimetablePrompt }, "📷 Copy a prompt to turn a photo into a list")),
       planUI.prompt && h("label", { style: "margin-bottom:.8rem" }, "Give this to another AI along with your photo, then paste its reply above",
         h("textarea", { readonly: true, style: "min-height:11rem", onfocus: (e) => e.target.select?.() }, planUI.prompt)),
       planUI.preview && h("div", { style: "border:1px solid var(--border);border-radius:12px;padding:.7rem;margin-bottom:1rem" },
