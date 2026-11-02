@@ -303,11 +303,16 @@ function checkExams() {
 /** Shrinks a photo so it uploads quickly and the AI can still read the small print. */
 function prepareImage(file) {
   return new Promise((resolve, reject) => {
-    if (!/^image\//.test(String(file.type || ""))) return reject(new Error("That isn't a picture. Choose a photo or screenshot."));
+    const isPdf = file.type === "application/pdf" || /\.pdf$/i.test(String(file.name || ""));
+    if (!isPdf && !/^image\//.test(String(file.type || ""))) return reject(new Error("That isn't a picture or PDF. Choose a photo, screenshot or PDF."));
     const reader = new FileReader();
-    reader.onerror = () => reject(new Error("I couldn't open that picture."));
+    reader.onerror = () => reject(new Error("I couldn't open that file."));
     reader.onload = () => {
       const src = String(reader.result);
+      if (isPdf) {
+        if (src.length > 3_900_000) return reject(new Error("That PDF is too big (over about 3 MB). Try a PDF of just the timetable page, or a screenshot."));
+        return resolve(src.replace(/^data:[^;,]*;/, "data:application/pdf;"));
+      }
       const img = new Image();
       img.onerror = () => reject(new Error("I couldn't read that picture. Try a JPEG or PNG."));
       img.onload = () => {
@@ -334,7 +339,7 @@ function prepareImage(file) {
 async function readTimetablePhoto(file) {
   if (!file) return;
   planUI.pasteOpen = true;
-  if (!cloud.signedIn) { toast("Sign in first — the AI needs your login to read a photo."); return render(); }
+  if (!cloud.signedIn) { toast("Sign in first — the AI needs your login to read a photo or PDF."); return render(); }
   planUI.reading = true;
   render();
   try {
@@ -342,7 +347,7 @@ async function readTimetablePhoto(file) {
     const r = await cloud.readTimetable({ image, today: today() });
     planUI.paste = r.text;
     planUI.reading = false;
-    if (checkExams()) toast("Read your photo ✓ — check the dates match it before adding");
+    if (checkExams()) toast("Read it ✓ — check the dates match your timetable before adding");
   } catch (e) {
     toast(e && e.message ? e.message : "I couldn't read that photo.");
   }
@@ -601,7 +606,7 @@ function viewPlan() {
 
   // ----- list view, paste import -----
   const shown = table.slice(0, planUI.shown);
-  const photoPick = h("input", { type: "file", accept: "image/*", "aria-label": "Photo of your exam timetable", style: "position:absolute;width:1px;height:1px;opacity:0;pointer-events:none", tabindex: "-1",
+  const photoPick = h("input", { type: "file", accept: "image/*,application/pdf,.pdf", "aria-label": "Photo or PDF of your exam timetable", style: "position:absolute;width:1px;height:1px;opacity:0;pointer-events:none", tabindex: "-1",
     onchange: (e) => { const f = e.target.files && e.target.files[0]; e.target.value = ""; readTimetablePhoto(f); } });
   const listCard = h("section", { class: "card" },
     h("details", { open: planUI.pasteOpen || !!planUI.preview, ontoggle: (e) => { planUI.pasteOpen = e.target.open; } },
@@ -610,9 +615,9 @@ function viewPlan() {
       h("textarea", { "aria-label": "Exam timetable to paste", style: "min-height:7rem", placeholder: "Maths Paper 1 | 14 May 2027 | GCSE | AQA | 9:00\nBiology | 21/05/2027 | Mock\nEnglish Literature, 3 June 2027", oninput: (e) => { planUI.paste = e.target.value; } }, planUI.paste),
       h("div", { class: "row", style: "margin:.6rem 0" },
         h("button", { onclick: checkExams }, "Check the list"),
-        h("button", { class: "primary", disabled: planUI.reading, onclick: () => photoPick.click() }, planUI.reading ? "⏳ Reading your photo…" : "📷 Read a photo of my timetable"),
+        h("button", { class: "primary", disabled: planUI.reading, onclick: () => photoPick.click() }, planUI.reading ? "⏳ Reading your timetable…" : "📷 Read a photo or PDF of my timetable"),
         photoPick),
-      h("p", { class: "small muted", style: "margin:0 0 .6rem" }, cloud.signedIn ? "Choose a clear photo or screenshot of your timetable and the AI will turn it into a list for you to check." : "Sign in to let the AI read a photo of your timetable for you."),
+      h("p", { class: "small muted", style: "margin:0 0 .6rem" }, cloud.signedIn ? "Choose a clear photo, screenshot or PDF of your timetable and the AI will turn it into a list for you to check." : "Sign in to let the AI read a photo or PDF of your timetable for you."),
       h("div", { class: "row", style: "margin:0 0 .6rem" }, h("button", { class: "ghost small", onclick: copyTimetablePrompt }, "Or copy a prompt to use with another AI")),
       planUI.prompt && h("label", { style: "margin-bottom:.8rem" }, "Give this to another AI along with your photo, then paste its reply above",
         h("textarea", { readonly: true, style: "min-height:11rem", onfocus: (e) => e.target.select?.() }, planUI.prompt)),

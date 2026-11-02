@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { onRequestPost, onRequest, cleanReply } from "../functions/api/timetable.js";
+import { onRequestPost, onRequest, cleanReply, pdfPrompt } from "../functions/api/timetable.js";
 
 const env = (ai) => ({ SUPABASE_URL: "https://x.supabase.co", SUPABASE_PUBLISHABLE_KEY: "sb_publishable_t", AI: ai });
 const post = (body, token = "Bearer good") => new Request("https://site/api/timetable", { method: "POST", headers: { authorization: token, "content-type": "application/json" }, body: typeof body === "string" ? body : JSON.stringify(body) });
@@ -50,4 +50,40 @@ test("cleanReply keeps piped lines, or all lines when none are piped, and caps l
   assert.equal(cleanReply("Intro\nA | 1 May 2027\nB | 2 May 2027"), "A | 1 May 2027\nB | 2 May 2027");
   assert.equal(cleanReply("Maths, 1 May 2027\nBio, 2 May 2027"), "Maths, 1 May 2027\nBio, 2 May 2027");
   assert.equal(cleanReply("x | y\n".repeat(500)).split("\n").length, 120);
+});
+
+const pdf = { image: "data:application/pdf;base64,JVBERi0xLjQK", today: "2026-11-02" };
+const pdfText = "Year 11 Mock Exams\nMon 12 Jan  Maths Paper 1  9:00\nTue 13 Jan  English Language Paper 1  9:00";
+
+test("PDFs: text is pulled out with toMarkdown, then a text model writes the list", async () => {
+  stubAuth(); let conv = null, seen = null;
+  const ai = { toMarkdown: async (f) => { conv = f; return [{ name: "timetable.pdf", format: "markdown", data: pdfText }]; }, run: async (m, i) => { seen = { m, i }; return { response: "Maths Paper 1 | 12 January 2027 | Mock | | | 9:00\nEnglish Language Paper 1 | 13 January 2027 | Mock | | | 9:00" }; } };
+  const r = await call(post(pdf), env(ai));
+  assert.equal(r.status, 200); assert.equal(r.body.source, "pdf");
+  assert.match(r.body.text, /^Maths Paper 1 \| 12 January 2027/);
+  assert.equal(conv.name, "timetable.pdf"); assert.equal(conv.blob.type, "application/pdf"); assert.equal(conv.blob.size, 9, "bytes decoded from base64");
+  assert.match(seen.m, /llama-3\.3-70b/);
+  const prompt = seen.i.messages[1].content;
+  assert.match(prompt, /Year 11 Mock Exams/); assert.match(prompt, /never instructions/); assert.doesNotMatch(prompt, /photo/);
+  assert.match(prompt, /Subject \| date \| type/);
+});
+
+test("PDFs: scans, unreadable files and AI failures give a helpful message", async () => {
+  stubAuth();
+  const scan = await call(post(pdf), env({ toMarkdown: async () => [{ format: "markdown", data: "# timetable.pdf\n## Metadata\n" }], run: async () => assert.fail("no text, no model call") }));
+  assert.equal(scan.status, 422); assert.match(scan.body.error, /no readable text/);
+  const bad = await call(post(pdf), env({ toMarkdown: async () => [{ format: "error", data: "x" }] }));
+  assert.equal(bad.status, 502); assert.match(bad.body.error, /couldn't open that PDF/);
+  const boom = await call(post(pdf), env({ toMarkdown: async () => { throw new Error("x"); } }));
+  assert.match(boom.body.error, /couldn't open that PDF/);
+  let n = 0;
+  const retry = await call(post(pdf), env({ toMarkdown: async () => [{ format: "markdown", data: pdfText }], run: async () => { if (++n === 1) throw new Error("boom"); return { response: "Maths | 12 January 2027" }; } }));
+  assert.equal(n, 2); assert.equal(retry.body.text, "Maths | 12 January 2027");
+  const limit = await call(post(pdf), env({ toMarkdown: async () => [{ format: "markdown", data: pdfText }], run: async () => { throw new Error("daily neurons limit"); } }));
+  assert.match(limit.body.error, /allowance/);
+});
+
+test("pdfPrompt turns the photo wording into text wording", () => {
+  const p = pdfPrompt("I'm attaching a photo of my exam timetable. Read it and go.\n- if the photo has no year", "TEXT");
+  assert.doesNotMatch(p, /photo/); assert.match(p, /TEXT/);
 });
