@@ -9,6 +9,8 @@ const TAB_IDS = TABS.map((t) => t[0]);
 const CATALOGUE = new Set(Shop.ITEMS.map((i) => i.id));
 
 const cloud = createCloud(CONFIG, { storage: safeStorage() });
+// Anonymous feature counters for the owner's admin panel (stats.js). Counting must never break the app.
+const track = (name, value) => { try { if (window.jtEvent) window.jtEvent(name, value); } catch { /* ignore */ } };
 let state = null;
 let storeKey = LOCAL_KEY;
 let tab = "home";
@@ -280,6 +282,7 @@ function addExam(date) {
   if (!date || date < today()) return toast("Pick a day that hasn't passed yet.");
   state.exams.push({ id: L.uid(), subject: subject.slice(0, 60), kind: planUI.kind, board: planUI.board === "Any exam board" ? "" : planUI.board, date, paper: planUI.paper.trim().slice(0, 40), time: planUI.time.trim().slice(0, 20) });
   sortExams();
+  track("exam_added");
   const { created } = ensureSubjectNamed(subject);
   planUI.subject = ""; planUI.paper = ""; planUI.time = "";
   save();
@@ -617,6 +620,8 @@ function render() {
   app.replaceChildren(...[
     inApp && !storageOk && h("div", { class: "banner", role: "alert" }, "This browser isn't letting the app save on this device. " + (cloud.signedIn ? "Your account copy is still saved." : "Your progress will be lost when you close the page — try turning off private browsing.")),
     view,
+    inApp && h("p", { class: "muted", style: "text-align:center;margin:1.2rem 0 0" },
+      h("button", { type: "button", class: "small ghost jt-fb-link", style: "display:none", onclick: () => { if (window.jtFeedback) window.jtFeedback(); } }, "💬 Send feedback")),
   ].filter(Boolean));
   showSync();
 }
@@ -781,6 +786,7 @@ function startSession(subjectId, length, mode = null) {
     queue: picked.map((q) => ({ id: q.id, retry: false })), index: 0, combo: 0, results: [], pointsEarned: 0, chests: 0,
     stage: "ask", verdict: false, given: "", dontKnow: false, finished: false, newBadges: [], shown: null,
   };
+  track("quiz_started");
   render();
 }
 
@@ -937,6 +943,8 @@ async function submitExam(written) {
     result = { ...L.markLocally(given, q.a, q.marks), feedback: "", source: "local" };
   }
   if (!session || session.index !== at || session.stage !== "marking") return;
+  track("exam_taken");
+  if (result.source === "ai") track("ai_marked");
   session.result = result;
   session.stage = "feedback";
   render();
@@ -1035,6 +1043,7 @@ function commit(correct) {
 function finishSession() {
   if (session.finished) return;
   session.finished = true;
+  track("quiz_finished");
   if (session.results.length >= 5 && session.results.every(Boolean)) {
     state.stats.perfectRounds++;
     toast("🎯 A perfect round!");
@@ -1090,6 +1099,7 @@ function addQuestion() {
   const wrong = [...new Set(draft.wrong.split(/\r?\n/).map((x) => x.trim()).filter(Boolean))].slice(0, 5);
   state.questions.push(makeQuestion(subjectId, q.slice(0, 500), a.slice(0, 300), wrong));
   state.stats.created++;
+  track("question_added");
   draft.q = ""; draft.a = ""; draft.wrong = "";
   checkBadges();
   save();
@@ -1148,6 +1158,7 @@ async function makeWithAi() {
   }
   draft.busy = false; draft.progress = "";
   if (items.length) {
+    track("ai_questions");
     setPreview("ai", items);
     if (items.length < total) draft.aiError = `I managed ${items.length} of the ${total} you asked for${failure ? " (" + failure + ")" : ""}. You can press the button again for more.`;
   } else {
