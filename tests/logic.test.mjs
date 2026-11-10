@@ -589,3 +589,119 @@ test("exam multiple choice and figure questions survive reading, saving and load
   assert.deepEqual(back.questions[0].opts, mc.opts); assert.equal(back.questions[0].a, "Carbon dioxide"); assert.equal(back.questions[1].fig.series[0].values[2], 60);
   assert.equal(L.parseQuestionList("Q | A | wrong1 | wrong2").items[0].opts, undefined, "ordinary quick questions never get options or figures");
 });
+
+// ---------- exam-style kinds: 1/2-mark multiple choice, Outline, 3, 6 and 9 markers ----------
+test("kindId understands what a model or a paste calls each kind", () => {
+  for (const [said, id] of [["mc1", "mc1"], ["MC", "mc1"], ["multiple choice", "mc1"], ["Select two", "mc2"], ["mc2", "mc2"], ["Outline", "outline"], ["outline one", "outline"], ["explain", "three"], ["3 mark", "three"], ["Analyse", "six"], ["discuss", "six"], ["6", "six"], ["Justify", "nine"], ["evaluate", "nine"], ["9-mark", "nine"]]) assert.equal(L.kindId(said), id, said);
+  for (const none of ["", "banana", null, undefined, "12"]) assert.equal(L.kindId(none), "", String(none));
+  assert.deepEqual(L.EXAM_KIND_IDS, ["mc1", "mc2", "outline", "three", "six", "nine"]);
+  assert.deepEqual(L.EXAM_KIND_IDS.map((k) => L.EXAM_KINDS[k].marks), [1, 2, 2, 3, 6, 9]);
+});
+
+test("examPlan makes a paper-style mix with every chosen kind present, in paper order", () => {
+  const all = L.examPlan(10);
+  assert.equal(all.length, 10); assert.deepEqual([...new Set(all)], L.EXAM_KIND_IDS, "every kind appears, in paper order");
+  assert.deepEqual(all, [...all].sort((a, b) => L.EXAM_KIND_IDS.indexOf(a) - L.EXAM_KIND_IDS.indexOf(b)));
+  assert.ok(all.filter((k) => k === "mc1").length > all.filter((k) => k === "nine").length, "more short questions than 9 markers, like a real paper");
+  assert.deepEqual(L.examPlan(4, ["six", "nine"]).sort(), ["nine", "six", "six", "six"].sort());
+  assert.deepEqual(L.examPlan(3, ["nine"]), ["nine", "nine", "nine"]);
+  assert.equal(L.examPlan(2, L.EXAM_KIND_IDS).length, 2, "fewer questions than kinds is fine");
+  assert.deepEqual(L.examPlan(5, ["nonsense"]), []); assert.deepEqual(L.examPlan(0), []); assert.equal(L.examPlan(500).length, 50);
+  assert.deepEqual(L.examPlan(5, ["MC", "select two"]).filter((k) => k === "mc2").length > 0, true, "kind names are understood");
+});
+
+test("cleanOptsMulti finds the two correct options however the answer is written", () => {
+  const opts = ["Glucose", "Oxygen", "Nitrogen", "Helium", "Methane"];
+  for (const ans of ["A, B", "A and B", "a & b", ["A", "B"], ["Glucose", "Oxygen"], "Glucose; Oxygen", "Oxygen; Glucose", "Glucose, Oxygen", "A. Glucose; B. Oxygen", "Glucose and Oxygen"]) {
+    assert.deepEqual(L.cleanOptsMulti(opts, ans), { opts, answers: ["Glucose", "Oxygen"] }, JSON.stringify(ans));
+  }
+  assert.equal(L.cleanOptsMulti(opts, "A"), null, "one answer isn't two");
+  assert.equal(L.cleanOptsMulti(opts, "A, B, C"), null, "three isn't two");
+  assert.equal(L.cleanOptsMulti(opts, "A, A"), null);
+  assert.equal(L.cleanOptsMulti(["a", "b", "c"], "A, B"), null, "needs at least four options");
+  assert.equal(L.cleanOptsMulti(["a", "a", "c", "d"], "A, C"), null, "duplicate options");
+  assert.equal(L.cleanOptsMulti(opts, "F, G"), null);
+});
+
+test("exam questions of each kind are read with the right marks, and the case-study extract is kept", () => {
+  const r = L.parseQuestionList(JSON.stringify([
+    { kind: "mc2", q: "Which TWO are products of photosynthesis?", marks: 2, opts: ["Glucose", "Oxygen", "Nitrogen", "Helium", "Methane"], a: "A, B" },
+    { kind: "mc", q: "Which gas is needed?", marks: 1, opts: ["Oxygen", "Carbon dioxide", "Nitrogen", "Helium"], a: "B" },
+    { kind: "outline", q: "Outline one way Kiko's could cut costs.", marks: 5, a: "buy in bulk ; so each item costs less", ctx: "Kiko's is a café." },
+    { kind: "outline", q: "Outline two ways ...", marks: 4, a: "a ; b ; c ; d" },
+    { kind: "three", q: "Explain one benefit ...", marks: 9, a: "id ; dev ; dev" },
+    { kind: "Analyse", q: "Analyse the impact ...", marks: 4, a: "a ; b ; c ; d" },
+    { kind: "justify", q: "Justify ...", marks: 7, a: "a ; b ; c ; d ; e" },
+    { q: "Which of these?", marks: 2, opts: ["a", "b", "c", "d", "e"], a: "B and D" },
+    { kind: "mc2", q: "Broken", marks: 2, opts: ["a", "b", "c", "d"], a: "A" },
+  ]));
+  assert.equal(r.items.length, 8); assert.equal(r.skipped, 1, "a select-two question that doesn't have two answers is skipped");
+  const [two, one, out1, out2, three, six, nine, guessed] = r.items;
+  assert.deepEqual([two.kind, two.marks, two.pick, two.answers, two.a], ["mc2", 2, 2, ["Glucose", "Oxygen"], "Glucose; Oxygen"]);
+  assert.deepEqual([one.kind, one.marks, one.a, one.pick], ["mc1", 1, "Carbon dioxide", undefined]);
+  assert.deepEqual([out1.kind, out1.marks, out1.ctx], ["outline", 2, "Kiko's is a café."], "Outline one is worth 2");
+  assert.equal(out2.marks, 4, "Outline two is worth 4");
+  assert.deepEqual([three.kind, three.marks], ["three", 3]); assert.deepEqual([six.kind, six.marks], ["six", 6]); assert.deepEqual([nine.kind, nine.marks], ["nine", 9]);
+  assert.deepEqual([guessed.kind, guessed.marks, guessed.answers], ["mc2", 2, ["b", "d"]], "a 2-mark multiple choice with two answers is select-two even without a kind");
+  assert.equal(L.examKindOf(two), "mc2"); assert.equal(L.examKindOf(one), "mc1"); assert.equal(L.examKindOf(six), "six");
+  assert.equal(L.isExtended(six), true); assert.equal(L.isExtended(nine), true); assert.equal(L.isExtended(three), false); assert.equal(L.isExtended(two), false);
+  // old-style items (no kind) are classed from their marks
+  assert.equal(L.examKindOf({ exam: true, marks: 9, q: "x" }), "nine"); assert.equal(L.examKindOf({ exam: true, marks: 3, q: "x" }), "three");
+  assert.equal(L.examKindOf({ exam: true, marks: 2, q: "Outline one thing" }), "outline"); assert.equal(L.examKindOf({ exam: true, marks: 4, q: "x" }), "other");
+  assert.equal(L.examKindOf({ q: "quick" }), "");
+  // a context on a multiple-choice question is not kept
+  assert.equal(L.parseQuestionList(JSON.stringify([{ q: "Q?", marks: 1, opts: ["a", "b", "c", "d"], a: "A", ctx: "extra" }])).items[0].ctx, undefined);
+});
+
+test("the new question fields survive saving and loading, and broken ones are dropped", () => {
+  const raw = {
+    subjects: [{ id: "s", name: "Business – Exam questions" }],
+    questions: [
+      { id: "1", subjectId: "s", q: "Which TWO?", a: "Glucose; Oxygen", exam: true, marks: 2, kind: "mc2", pick: 2, opts: ["Glucose", "Oxygen", "Nitrogen", "Helium", "Methane"], answers: ["Glucose", "Oxygen"] },
+      { id: "2", subjectId: "s", q: "Outline one …", a: "p ; q", exam: true, marks: 2, kind: "outline", ctx: "Kiko's is a café." },
+      { id: "3", subjectId: "s", q: "Justify …", a: "a ; b", exam: true, marks: 9, kind: "nine" },
+      { id: "4", subjectId: "s", q: "Broken", a: "x", exam: true, marks: 2, kind: "mc2", pick: 2, opts: ["a", "b", "c", "d"], answers: ["a"] },
+      { id: "5", subjectId: "s", q: "Quick", a: "x", kind: "nine", ctx: "should not be kept" },
+    ],
+  };
+  const s = L.sanitiseState(raw);
+  assert.deepEqual(s.questions.map((q) => q.id), ["1", "2", "3", "5"], "the select-two question with a single answer is dropped");
+  const [two, out, nine, quick] = s.questions;
+  assert.deepEqual([two.marks, two.pick, two.answers, two.kind], [2, 2, ["Glucose", "Oxygen"], "mc2"]);
+  assert.deepEqual([out.kind, out.ctx, out.marks], ["outline", "Kiko's is a café.", 2]); assert.equal(nine.kind, "nine");
+  assert.equal(quick.kind, undefined); assert.equal(quick.ctx, undefined); assert.equal(quick.exam, undefined);
+  assert.deepEqual(L.sanitiseState(JSON.parse(JSON.stringify(s))).questions, s.questions, "saving twice changes nothing");
+});
+
+test("the prompt for another AI asks for the chosen kinds, and for a made-up business in Business", () => {
+  const biz = L.buildAiPrompt({ topic: "Marketing", mode: "exam", subject: "Business", board: "Edexcel", count: 8 });
+  for (const kind of ["mc1", "mc2", "outline", "three", "six", "nine"]) assert.match(biz, new RegExp(`"kind":"${kind}"`), kind);
+  assert.match(biz, /made-up business/); assert.match(biz, /"ctx"/); assert.match(biz, /Edexcel specification/); assert.match(biz, /Outline one/); assert.match(biz, /Justify/);
+  const hist = L.buildAiPrompt({ topic: "Cold War", mode: "exam", subject: "History", count: 6 });
+  assert.doesNotMatch(hist, /"kind":"mc/, "no multiple choice for History unless asked"); assert.match(hist, /"kind":"nine"/); assert.doesNotMatch(hist, /made-up business/);
+  const mc = L.buildAiPrompt({ topic: "Cold War", mode: "exam", subject: "History", count: 6, kinds: ["mc1", "mc2"] });
+  assert.match(mc, /"kind":"mc2"/); assert.doesNotMatch(mc, /"kind":"six"/);
+  assert.match(L.buildAiPrompt({ topic: "Cells", mode: "exam" }), /exam-style/);
+  assert.doesNotMatch(L.buildAiPrompt({ topic: "Cells" }), /"kind"/, "quick prompts are unchanged");
+  // what the prompt asks for is exactly what the reader accepts
+  const reply = JSON.stringify([{ kind: "six", q: "Analyse …", marks: 6, a: "a ; b ; c ; d" }, { kind: "outline", q: "Outline one …", marks: 2, a: "a ; b" }]);
+  assert.equal(L.parseQuestionList(reply).items.length, 2);
+});
+
+test("6 and 9 mark answers are placed in a level, then given a mark inside it", () => {
+  assert.deepEqual(L.levelBands(6), [[1, 2], [3, 4], [5, 6]]); assert.deepEqual(L.levelBands(9), [[1, 3], [4, 6], [7, 9]]); assert.deepEqual(L.levelBands(12), [[1, 4], [5, 8], [9, 12]]);
+  const scheme = "Higher prices increase revenue per sale ; competitors may undercut so sales fall ; a premium brand image supports a higher price ; promotion raises awareness ; overall it depends on elasticity";
+  const none = L.markLocally("dunno", scheme, 9, "nine");
+  assert.deepEqual([none.awarded, none.level], [0, 0]);
+  const list = L.markLocally("Higher prices increase revenue per sale. Competitors may undercut so sales fall. Promotion raises awareness.", scheme, 9, "nine");
+  assert.equal(list.level, 1, "a list with no explanation stays in level 1"); assert.ok(list.awarded >= 1 && list.awarded <= 3);
+  const strong = "I think higher prices increase revenue per sale because each customer pays more, which means profit goes up if demand holds. However competitors may undercut so sales fall as customers switch, which leads to lower revenue and a weaker market share over time. A premium brand image supports a higher price because customers expect quality, so the business can keep its margin. Promotion raises awareness of the brand, which means more people are willing to pay. Overall the best choice depends on elasticity, so the business should test a small rise first and I would recommend that because it limits the risk.";
+  const good = L.markLocally(strong, scheme, 9, "nine");
+  assert.equal(good.level, 3); assert.ok(good.awarded >= 7 && good.awarded <= 9, String(good.awarded));
+  const noJudgement = L.markLocally(strong.replace(/Overall.*$/, "").replace(/I think |however /gi, ""), scheme, 9, "nine");
+  assert.ok(noJudgement.level <= 2, "a 9 marker with no judgement can't reach level 3");
+  assert.equal(L.markLocally("Higher prices increase revenue per sale because customers pay more, which means profit rises.", scheme, 6, "six").level >= 1, true);
+  // shorter questions still count marking points
+  assert.equal(L.markLocally("Higher prices increase revenue per sale; competitors may undercut so sales fall", scheme, 3).awarded, 2);
+  assert.equal(L.markLocally("Higher prices increase revenue per sale", scheme, 3).level, undefined);
+});

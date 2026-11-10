@@ -242,3 +242,11 @@ button.danger-solid:hover:not(:disabled) { border-color: var(--bad); filter: bri
 .fig-table { border-collapse: collapse; width: 100%; font-size: .92rem; }
 .fig-table th, .fig-table td { border: 1px solid var(--border); padding: .3rem .55rem; text-align: left; }
 .fig-table th { background: var(--card); font-weight: 700; }
+
+/* ---------- exam-style questions ---------- */
+.choices button.chosen { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, var(--card)); box-shadow: inset 0 0 0 1px var(--accent); }
+.case { margin: .8rem 0 0; padding: .7rem .9rem; border-left: 4px solid var(--accent); border-radius: 0 12px 12px 0; background: var(--bg); color: var(--fg); font-size: .98rem; white-space: pre-wrap; overflow-wrap: anywhere; }
+.case-label { display: block; font-size: .72rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin-bottom: .2rem; }
+.chips { display: flex; flex-wrap: wrap; gap: .4rem; }
+.chip { font-size: .88rem; padding: .35rem .8rem; min-height: 38px; border-radius: 999px; }
+.chip.on { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }

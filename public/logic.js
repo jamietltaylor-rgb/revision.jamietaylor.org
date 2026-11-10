@@ -328,6 +328,127 @@ export function examFormats(...names) {
   return { mc: false, figures: [] };
 }
 
+// ---------- exam-style question kinds (the way real papers set them) ----------
+/**
+ * The kinds of question on a real paper, in the order a paper usually runs. `marks` is what each is worth.
+ *   mc1      Multiple choice, pick one (1)           mc2   Multiple choice, "select two answers" (2)
+ *   outline  "Outline one …" — identify + a linked point (2)
+ *   three    "Explain one …" — 1 mark identify + 2 develop (3)
+ *   six      "Analyse … / Discuss …" extended answer, marked in levels (6)
+ *   nine     "Justify … / Evaluate …" extended answer with a judgement, marked in levels (9)
+ */
+export const EXAM_KINDS = {
+  mc1: { label: "Multiple choice", marks: 1, hint: "pick one" },
+  mc2: { label: "Select two", marks: 2, hint: "multiple choice, pick two" },
+  outline: { label: "Outline", marks: 2, hint: "“Outline one…”" },
+  three: { label: "Explain", marks: 3, hint: "“Explain one…”" },
+  six: { label: "Analyse / Discuss", marks: 6, hint: "extended answer" },
+  nine: { label: "Justify", marks: 9, hint: "extended answer + judgement" },
+};
+export const EXAM_KIND_IDS = Object.keys(EXAM_KINDS);
+const KIND_ALIASES = {
+  mc: "mc1", mcq: "mc1", multiplechoice: "mc1", onemark: "mc1", "1": "mc1", "1mark": "mc1",
+  selecttwo: "mc2", choosetwo: "mc2", twoanswers: "mc2", mc2marks: "mc2", multiplechoice2: "mc2",
+  outlineone: "outline", outlinetwo: "outline", "2mark": "outline",
+  explain: "three", explainone: "three", "3": "three", "3mark": "three", threemark: "three",
+  analyse: "six", analyze: "six", discuss: "six", "6": "six", "6mark": "six", sixmark: "six",
+  justify: "nine", evaluate: "nine", "9": "nine", "9mark": "nine", ninemark: "nine",
+};
+/** Turns whatever a model or a paste calls a kind ("MC", "select two", "6 mark") into one of the ids above, or "". */
+export function kindId(v) {
+  const t = String(v ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  if (!t) return "";
+  return EXAM_KINDS[t] ? t : (KIND_ALIASES[t] || "");
+}
+/** Which kind an exam item is: its stored kind, or worked out from its options/marks. "other" when it fits none (e.g. an old 4-mark question). */
+export function examKindOf(it) {
+  if (!it || !it.exam) return "";
+  if (it.opts) return it.pick === 2 || (Array.isArray(it.answers) && it.answers.length === 2) ? "mc2" : "mc1";
+  const k = kindId(it.kind);
+  if (k && k !== "mc1" && k !== "mc2") return k;
+  const m = Number(it.marks) || 0;
+  if (m >= 9) return "nine";
+  if (m >= 6) return "six";
+  if (m === 3) return "three";
+  if (m === 2 && /^\s*outline\b/i.test(String(it.q ?? ""))) return "outline";
+  return "other";
+}
+/** Extended-response questions (6 and 9 markers) are marked in levels, not point by point. */
+export const isExtended = (it) => Boolean(it && it.exam && !it.opts && Number(it.marks) >= 6);
+
+const PAPER_ORDER = ["mc1", "mc2", "outline", "three", "six", "nine"];
+const KIND_WEIGHT = { mc1: 3, mc2: 1, outline: 2, three: 3, six: 2, nine: 1 };
+/**
+ * A realistic mix: which kind each of `count` questions should be, in the order a paper runs.
+ * Every chosen kind appears at least once when there is room; the rest follow real-paper proportions.
+ */
+export function examPlan(count, kinds = EXAM_KIND_IDS) {
+  const chosen = PAPER_ORDER.filter((k) => (Array.isArray(kinds) ? kinds : []).map(kindId).includes(k));
+  const n = Math.max(0, Math.min(50, Math.round(Number(count)) || 0));
+  if (!chosen.length || !n) return [];
+  const total = chosen.reduce((s, k) => s + KIND_WEIGHT[k], 0);
+  const quota = Object.fromEntries(chosen.map((k) => [k, 0]));
+  if (n >= chosen.length) for (const k of chosen) quota[k] = 1;
+  let left = n - Object.values(quota).reduce((s, v) => s + v, 0);
+  // hand out what's left by weight, largest shortfall first (deterministic)
+  while (left > 0) {
+    let best = null, bestGap = -Infinity;
+    for (const k of chosen) {
+      const gap = (n * KIND_WEIGHT[k]) / total - quota[k];
+      if (gap > bestGap + 1e-9) { best = k; bestGap = gap; }
+    }
+    quota[best]++; left--;
+  }
+  return chosen.flatMap((k) => Array(quota[k]).fill(k));
+}
+
+/** The kinds offered by default for a subject: everything, with multiple choice only where that subject's papers use it. */
+export function defaultExamKinds(...names) {
+  const mc = examFormats(...names).mc;
+  return EXAM_KIND_IDS.filter((k) => mc || (k !== "mc1" && k !== "mc2"));
+}
+
+/** True for Business subjects, whose long questions are set around a made-up business (as on the Edexcel papers). */
+export const isBusinessSubject = (...names) => names.some((n) => /\bbusiness\b/i.test(String(n ?? "")));
+
+/**
+ * What to tell a question-writing AI about each kind: the JSON shape and the rules real papers follow.
+ * Used by both the built-in question maker (server) and the "copy a prompt for another AI" text.
+ */
+export function examKindGuide(kind, { business = false } = {}) {
+  const ctxNote = business
+    ? ` Set it in ONE made-up business that you introduce in "ctx" (2–4 sentences: its name, what it sells or does, and one or two facts — e.g. size, location, a recent change, a figure) and name that business in the question.`
+    : ` If the question needs a scenario, add it as a short "ctx" (1–3 sentences); otherwise leave "ctx" out.`;
+  const levelNote = (top) => ` The mark scheme is the indicative content: ${top === 9 ? "5–7" : "4–6"} short points separated by ; — what a good answer could include, in this order: knowledge/application points, then chains of reasoning ("this means… which leads to…")${top === 9 ? ", then the possible justified judgements (either side can score if it is justified)" : ""}. Marked in levels, so they do not need every point.`;
+  const guides = {
+    mc1: {
+      shape: `{"kind":"mc1","q":"the question stem","marks":1,"opts":["option","option","option","option"],"a":"the correct option written out exactly as it appears in opts"}`,
+      rules: `1-mark multiple choice, "select one answer". Exactly 4 options: one clearly correct, three plausible wrong ones, no "all of the above", no letters in the options.`,
+    },
+    mc2: {
+      shape: `{"kind":"mc2","q":"Which TWO of the following …?","marks":2,"opts":["option","option","option","option","option"],"a":"first correct option ; second correct option (each written out exactly as it appears in opts)"}`,
+      rules: `2-mark multiple choice, "select two answers": the stem asks for TWO answers, there are exactly 5 options, exactly two are correct (1 mark each) and three plausible wrong ones. No letters in the options.`,
+    },
+    outline: {
+      shape: `{"kind":"outline","q":"Outline one …","marks":2,"a":"the point ; the linked development of that point"${business ? ',"ctx":"the business"' : ""}}`,
+      rules: `2-mark "Outline one …" question: 1 mark for a valid point and 1 mark for a linked point that develops it (because… / so… / which means…). The mark scheme has exactly two points separated by ; (the second builds on the first). Short and tightly worded: ${business ? "ask for something appropriate for the business, e.g. “Outline one way … could …”" : "the question asks for one thing only"}.${business ? ctxNote : ""}`,
+    },
+    three: {
+      shape: `{"kind":"three","q":"Explain one …","marks":3,"a":"identification ; development ; further development"}`,
+      rules: `3-mark "Explain one benefit/drawback/reason/way …" question: 1 mark for identifying a valid point, plus 2 marks for development — explaining why or how, each step extending the last. The mark scheme has exactly three points separated by ; in that order. Real papers say "Explain ONE …" so a student cannot get marks for a list.`,
+    },
+    six: {
+      shape: `{"kind":"six","q":"${business ? "Analyse the impact on [the business] of …" : "Analyse / Discuss / Explain …"}","marks":6,"a":"indicative content points separated by ;"${business ? ',"ctx":"the business"' : ""}}`,
+      rules: `6-mark extended-response question (${business ? "command words: Analyse the impact on … of …, or Discuss whether …" : "command words: Analyse, Discuss, Explain why, Compare"}).${levelNote(6)}${business ? ctxNote : ""}`,
+    },
+    nine: {
+      shape: `{"kind":"nine","q":"${business ? "Justify which ONE of the following … / Justify whether or not [the business] should …" : "Evaluate … / Justify whether … / To what extent …"}","marks":9,"a":"indicative content points separated by ;"${business ? ',"ctx":"the business"' : ""}}`,
+      rules: `9-mark extended-response question that ends in a justified judgement (${business ? "command words: Justify which one of …, or Justify whether or not …" : "command words: Evaluate, Justify, To what extent, Assess"}).${levelNote(9)}${business ? ctxNote : ""}`,
+    },
+  };
+  return guides[kindId(kind)] || null;
+}
+
 const asNum = (v) => { const n = typeof v === "string" ? Number(v.replace(/,/g, "").trim()) : v; return typeof n === "number" && Number.isFinite(n) && Math.abs(n) < 1e9 ? Math.round(n * 1e6) / 1e6 : null; };
 const cellText = (v, n) => clean(typeof v === "number" ? String(v) : v).slice(0, n);
 function figType(t) {
@@ -377,13 +498,58 @@ export function cleanFigure(fig, allowed = FIG_TYPES) {
   return { ...base, xLabel, yLabel, labels, series };
 }
 
-/** Checks and tidies the options of an exam multiple-choice question and finds which one is correct. Returns { opts, a } or null. */
-export function cleanOpts(opts, answer) {
+function optionList(opts, min, max) {
   if (!Array.isArray(opts)) return null;
-  const list = opts.map((o) => clean(o && typeof o === "object" ? (o.text ?? o.option ?? "") : o).replace(/^\(?[A-Ea-e][.):]\s+/, "").slice(0, 200));
-  if (list.length < 3 || list.length > 5 || list.some((o) => !o)) return null;
+  const list = opts.map((o) => clean(o && typeof o === "object" ? (o.text ?? o.option ?? "") : o).replace(/^\(?[A-Fa-f][.):]\s+/, "").slice(0, 200));
+  if (list.length < min || list.length > max || list.some((o) => !o)) return null;
   const keys = list.map((o) => normalise(o) || o.toLowerCase());
   if (new Set(keys).size !== keys.length) return null;
+  return { list, keys };
+}
+
+/**
+ * The "Select two answers" kind of multiple choice (worth 2 marks): 4–6 options, exactly two correct.
+ * `answer` can be an array, "C, E", "C and E", or the two options written out and separated by ";".
+ * Returns { opts, answers: [two option texts] } or null.
+ */
+export function cleanOptsMulti(opts, answer, n = 2) {
+  const ol = optionList(opts, 4, 6);
+  if (!ol) return null;
+  const { list, keys } = ol;
+  const indexOf = (piece) => {
+    const s = clean(piece);
+    const letter = /^\(?([A-Fa-f])\)?[.:]?$/.exec(s);
+    if (letter) { const i = letter[1].toUpperCase().charCodeAt(0) - 65; return i < list.length ? i : -1; }
+    const stripped = s.replace(/^\(?[A-Fa-f][.):]\s+/, "");
+    return keys.indexOf(normalise(stripped) || stripped.toLowerCase());
+  };
+  let picks = [];
+  if (Array.isArray(answer)) picks = answer.map(indexOf);
+  else {
+    const raw = clean(answer);
+    const parts = raw.split(/\s*[;|]\s*/).filter(Boolean);
+    if (parts.length === n) picks = parts.map(indexOf);
+    if (picks.length !== n || picks.some((i) => i < 0)) {
+      picks = [];
+      if (/^\(?[A-Fa-f]\)?(?:\s*(?:,|and|&)\s*\(?[A-Fa-f]\)?)+$/i.test(raw)) picks = raw.split(/\s*(?:,|and|&)\s*/i).map(indexOf);
+      else { const commas = raw.split(/\s*,\s*/).filter(Boolean); if (commas.length === n) picks = commas.map(indexOf); }
+    }
+    if (picks.length !== n || picks.some((i) => i < 0)) { // last resort: which option texts appear in the answer
+      const hay = normalise(raw) || raw.toLowerCase();
+      picks = keys.map((k, i) => (k && hay.includes(k) ? i : -1)).filter((i) => i >= 0);
+    }
+  }
+  const uniq = [...new Set(picks)];
+  if (uniq.length !== n || uniq.some((i) => i < 0)) return null;
+  uniq.sort((x, y) => x - y);
+  return { opts: list, answers: uniq.map((i) => list[i]) };
+}
+
+/** Checks and tidies the options of an exam multiple-choice question and finds which one is correct. Returns { opts, a } or null. */
+export function cleanOpts(opts, answer) {
+  const ol = optionList(opts, 3, 5);
+  if (!ol) return null;
+  const { list, keys } = ol;
   const a = clean(answer);
   let m = /^\(?([A-Ea-e])\)?[.:]?$/.exec(a) || /^\(?([A-Ea-e])[.):]\s+/.exec(a);
   if (m) { const i = m[1].toUpperCase().charCodeAt(0) - 65; if (i < list.length) return { opts: list, a: list[i] }; }
@@ -553,11 +719,26 @@ function toItem(parts, alts = [], src = "", marks = 0, extra = {}) {
   const source = clean(src).slice(0, 80);
   if (exam) {
     const item = { q: q.slice(0, 800), a: a.slice(0, 1200), choices: [], exam: true, marks: Math.min(12, m), ...(source ? { src: source } : {}) };
-    if (extra.opts !== undefined && extra.opts !== null) { // exam multiple choice: options in a fixed order, worth 1 mark
-      const o = cleanOpts(extra.opts, a);
-      if (!o) return null;
-      item.opts = o.opts; item.a = o.a; item.marks = 1;
+    const kind = kindId(extra.kind);
+    const hasOpts = extra.opts !== undefined && extra.opts !== null;
+    if (hasOpts) { // exam multiple choice: options in a fixed order — pick one (1 mark) or "select two" (2 marks)
+      let done = false;
+      if (kind === "mc2" || (kind !== "mc1" && m === 2)) {
+        const o = cleanOptsMulti(extra.opts, extra.answers ?? a);
+        if (o) { item.opts = o.opts; item.answers = o.answers; item.a = o.answers.join("; "); item.pick = 2; item.marks = 2; item.kind = "mc2"; done = true; }
+        else if (kind === "mc2") return null;
+      }
+      if (!done) {
+        const o = cleanOpts(extra.opts, a);
+        if (!o) return null;
+        item.opts = o.opts; item.a = o.a; item.marks = 1; item.kind = "mc1";
+      }
+    } else if (kind && kind !== "mc1" && kind !== "mc2") { // a written kind: its mark total is fixed ("Outline two" is the only 4-mark one)
+      item.kind = kind;
+      item.marks = kind === "outline" ? (m === 4 ? 4 : 2) : EXAM_KINDS[kind].marks;
     }
+    const ctx = clean(extra.ctx).slice(0, 700);
+    if (ctx && !item.opts) item.ctx = ctx; // the short business/scenario extract a case-study question is set around
     if (extra.fig !== undefined && extra.fig !== null) { // a graph, chart or table the question refers to
       const f = cleanFigure(extra.fig);
       if (!f) return null;
@@ -580,11 +761,13 @@ function fromJson(text) {
     if (Array.isArray(row)) item = toItem(row);
     else if (row && typeof row === "object") {
       const q = row.q ?? row.question ?? row.front ?? row.prompt;
-      const a = row.a ?? row.answer ?? row.back;
+      let a = row.a ?? row.answer ?? row.back;
+      if (Array.isArray(a)) a = a.join("; ");
+      else if ((a === undefined || a === null || a === "") && Array.isArray(row.answers)) a = row.answers.join("; ");
       const wrong = row.wrong ?? row.choices ?? row.options ?? row.distractors ?? [];
       let alts = row.alt ?? row.alts ?? row.alternatives ?? row.also ?? row.accept ?? [];
       if (typeof alts === "string") alts = alts.split(/\s*[;|]\s*/);
-      item = toItem([q, a, ...(Array.isArray(wrong) ? wrong : [])], Array.isArray(alts) ? alts : [], typeof (row.src ?? row.source) === "string" ? (row.src ?? row.source) : "", row.marks ?? row.mark ?? 0, { opts: row.opts ?? row.options ?? row.mc, fig: row.fig ?? row.figure });
+      item = toItem([q, a, ...(Array.isArray(wrong) ? wrong : [])], Array.isArray(alts) ? alts : [], typeof (row.src ?? row.source) === "string" ? (row.src ?? row.source) : "", row.marks ?? row.mark ?? 0, { opts: row.opts ?? row.options ?? row.mc, fig: row.fig ?? row.figure, kind: row.kind ?? row.type, ctx: row.ctx ?? row.context ?? row.extract ?? row.scenario, answers: row.answers });
     }
     if (item) items.push(item); else skipped++;
   }
@@ -675,21 +858,27 @@ export const STYLES = { typed: "typed answers", choice: "multiple choice", mixed
 /** The text people copy into another AI (ChatGPT, Gemini…) to get questions this app can read. */
 export const BOARDS = ["Any exam board", "AQA", "Edexcel", "OCR", "WJEC / Eduqas", "CCEA", "SQA"];
 
-export function buildAiPrompt({ topic, level = "GCSE", count = 15, style = "mixed", paper = false, board = "", mode = "quick" } = {}) {
+export function buildAiPrompt({ topic, level = "GCSE", count = 15, style = "mixed", paper = false, board = "", mode = "quick", kinds, subject = "" } = {}) {
   const t = clean(topic).slice(0, 120) || "[type your topic here]";
   const n = Math.max(1, Math.min(50, Math.round(Number(count)) || 15));
   const lvl = clean(level) || "GCSE";
   const tailor = boardLine(board, lvl);
   if (mode === "exam") {
-    return `Write ${Math.min(n, 20)} complete exam questions about "${t}" at ${lvl} level.${tailor}
+    const business = isBusinessSubject(subject, topic);
+    const want = (Array.isArray(kinds) && kinds.length ? kinds : defaultExamKinds(subject, topic)).map(kindId).filter(Boolean);
+    const plan = examPlan(Math.min(n, 20), want.length ? want : EXAM_KIND_IDS);
+    const used = PAPER_ORDER.filter((k) => plan.includes(k));
+    const counts = used.map((k) => `${plan.filter((x) => x === k).length} × ${EXAM_KINDS[k].marks}-mark ${EXAM_KINDS[k].label.toLowerCase()}`).join(", ");
+    const guides = used.map((k) => examKindGuide(k, { business }));
+    return `Write ${plan.length} exam-style questions about "${t}"${clean(subject) ? ` (subject: ${clean(subject)})` : ""} at ${lvl} level, laid out like a real exam paper: ${counts}.${tailor}
 
-Reply with ONLY a JSON array, in exactly this shape:
-[{"q": "the full question as it would be printed on the paper", "marks": 4, "a": "mark scheme: each marking point separated by  ;  (one point per mark)"}]
+Reply with ONLY a JSON array, in the order a paper would run (shortest first). Use these shapes:
+${used.map((k, i) => `${i + 1}. ${guides[i].shape}`).join("\n")}
 
 Rules:
-- Each question is worth between 2 and 6 marks (a mix), and has about one marking point per mark.
-- Use real exam command words (state, describe, explain, calculate, compare, evaluate) and the layout real papers use.
-- Marking points must be factually correct and short. No markdown, no numbering, no text outside the JSON.${paperLines(paper, board, lvl)}`;
+${used.map((k, i) => `- ${k}: ${guides[i].rules}`).join("\n")}
+- Do not put the number of marks in the question text — the app shows it. Real command words only. Marking points must be factually correct and short.
+- No markdown, no numbering, no text outside the JSON.${business ? "\n- This is modelled on the Edexcel GCSE Business papers: questions about a made-up business, with 'Outline one…', 'Explain one…', 'Analyse the impact on…' and 'Justify…' command words." : ""}${paperLines(paper, board, lvl)}`;
   }
   const styleLine = {
     typed: "Do not include wrong options — every question is answered by typing.",
@@ -895,8 +1084,17 @@ export function sanitiseState(raw, catalogueIds = null) {
     const isExam = q.exam === true && Number.isFinite(q.marks) && q.marks >= 1;
     const text = str(q.q, isExam ? 800 : 500);
     let answer = str(q.a, isExam ? 1200 : 300);
-    let opts = null, fig = null;
-    if (isExam && q.opts !== undefined && q.opts !== null) { const o = cleanOpts(q.opts, answer); if (!o) continue; opts = o.opts; answer = o.a; }
+    let opts = null, fig = null, answers = null, kind = "", ctx = "";
+    if (isExam && q.opts !== undefined && q.opts !== null) {
+      const two = q.pick === 2 || (Array.isArray(q.answers) && q.answers.length === 2) || kindId(q.kind) === "mc2";
+      const multi = two ? cleanOptsMulti(q.opts, Array.isArray(q.answers) ? q.answers : answer) : null;
+      if (multi) { opts = multi.opts; answers = multi.answers; answer = multi.answers.join("; "); kind = "mc2"; }
+      else { const o = cleanOpts(q.opts, answer); if (!o) continue; opts = o.opts; answer = o.a; kind = "mc1"; }
+    } else if (isExam) {
+      const k = kindId(q.kind);
+      if (k && k !== "mc1" && k !== "mc2") kind = k;
+      ctx = str(q.ctx, 700);
+    }
     if (isExam && q.fig !== undefined && q.fig !== null) { fig = cleanFigure(q.fig); if (!fig) continue; }
     const subjectId = str(q.subjectId, 40);
     if (!id || !text || !answer || !subjectIds.has(subjectId) || questionIds.has(id)) continue;
@@ -905,8 +1103,11 @@ export function sanitiseState(raw, catalogueIds = null) {
       id, subjectId, q: text, a: answer,
       choices: (Array.isArray(q.choices) ? q.choices : []).map((c) => str(c, 200)).filter(Boolean).slice(0, 5),
       ...(str(q.src, 80) ? { src: str(q.src, 80) } : {}),
-      ...(isExam ? { exam: true, marks: opts ? 1 : Math.min(12, Math.round(q.marks)) } : {}),
+      ...(isExam ? { exam: true, marks: opts ? (answers ? 2 : 1) : Math.min(12, Math.round(q.marks)) } : {}),
+      ...(kind ? { kind } : {}),
+      ...(ctx ? { ctx } : {}),
       ...(opts ? { opts } : {}),
+      ...(answers ? { answers, pick: 2 } : {}),
       ...(fig ? { fig } : {}),
       box: Math.round(num(q.box, 1, MAX_BOX, 1)),
       due: typeof q.due === "string" && DATE_RE.test(q.due) ? q.due : "1970-01-01",
@@ -1156,11 +1357,22 @@ export function buildTimetable(exams, plan, today, maxDays = 60) {
 const MARK_STOP = new Set(["for", "to", "with", "from", "they", "their", "them", "can", "which", "when", "that", "then", "has", "have", "had", "will", "also", "into", "onto", "because", "so", "if", "or", "but"]);
 export const schemePoints = (scheme) => String(scheme ?? "").split(/\s*[;•\n]\s*/).map(clean).filter(Boolean);
 
+/** The three levels an extended answer is marked in: [[lo, hi] for level 1, level 2, level 3]. 6 marks → 1–2, 3–4, 5–6; 9 marks → 1–3, 4–6, 7–9. */
+export function levelBands(marks) {
+  const m = Math.max(3, Math.round(Number(marks)) || 6), b = m / 3;
+  return [0, 1, 2].map((k) => [Math.floor(b * k + 1e-9) + 1, Math.min(m, Math.round(b * (k + 1)))]);
+}
+
+const CHAIN_WORDS = /\b(because|therefore|which means|this means|so that|leads? to|led to|as a result|resulting|consequently|since|due to|meaning|allows?|so the|so they|which could|which would)\b/gi;
+const JUDGE_WORDS = /\b(overall|on balance|in conclusion|i would|i think|i believe|should|best|most important|most suitable|justif\w*|recommend\w*|the better|more likely|outweigh\w*)\b/i;
+
 /**
  * A simple marker that works offline: each marking point scores if most of its key words appear in the answer.
- * Returns { awarded, total, points: [{ text, met }] }.
+ * 6- and 9-mark answers are placed in a level (1–3) from how many ideas they cover, whether they explain them with
+ * chains of reasoning and, for 9 markers, whether they reach a judgement — then given a mark inside that level.
+ * Returns { awarded, total, points: [{ text, met }], level? }.
  */
-export function markLocally(answer, scheme, marks) {
+export function markLocally(answer, scheme, marks, kind = "") {
   const points = schemePoints(scheme);
   const given = answerTokens(answer);
   const results = points.map((text) => {
@@ -1170,6 +1382,24 @@ export function markLocally(answer, scheme, marks) {
     return { text, met: matched >= Math.max(1, Math.ceil(exp.length * 0.5)) };
   });
   const total = Math.max(1, Math.min(12, Math.round(Number(marks)) || points.length || 1));
+  const k = kindId(kind);
+  if (total >= 6 || k === "six" || k === "nine") {
+    const text = String(answer ?? "");
+    const words = (text.match(/\S+/g) || []).length;
+    const metCount = results.filter((r) => r.met).length;
+    const frac = results.length ? metCount / results.length : 0;
+    const chains = (text.match(CHAIN_WORDS) || []).length;
+    const judged = JUDGE_WORDS.test(text);
+    const long = total >= 9 ? 90 : 50;
+    let level = 0;
+    if (metCount >= 1 || words >= 20) level = 1;
+    if (level && frac >= 0.34 && chains >= 1 && words >= long / 2) level = 2;
+    if (level === 2 && frac >= 0.6 && chains >= 2 && words >= long) level = 3;
+    if (level === 3 && total >= 9 && !judged) level = 2;
+    const [lo, hi] = level ? levelBands(total)[level - 1] : [0, 0];
+    const awarded = level ? Math.max(lo, Math.min(hi, lo + Math.round((hi - lo) * Math.min(1, frac * 1.2)))) : 0;
+    return { awarded: Math.min(total, awarded), total, points: results, level };
+  }
   return { awarded: Math.min(total, results.filter((r) => r.met).length), total, points: results };
 }
 

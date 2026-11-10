@@ -91,12 +91,13 @@ test("past-paper mode tags the questions and other accepted answers are kept", a
 
 test("exam mode returns complete questions with marks and mark schemes, tailored to the board", async () => {
   stubAuth(); let prompt = "";
-  const reply = JSON.stringify([{ q: "Explain why plants need light. [4 marks]", marks: 4, a: "photosynthesis ; glucose ; chlorophyll ; energy" }, { q: "Not an exam question", a: "x" }]);
+  const reply = JSON.stringify([{ kind: "three", q: "Explain one reason plants need light. [3 marks]", marks: 3, a: "energy for photosynthesis ; to make glucose ; used for growth" }, { q: "Not an exam question", a: "x" }, { q: "A 4-mark question with no kind", marks: 4, a: "a ; b ; c ; d" }]);
   const r = await call(post({ topic: "Plants", count: 50, mode: "exam", board: "Edexcel", paper: true }), env({ run: async (m, i) => { prompt = i.messages[1].content; return { response: reply }; } }));
-  assert.match(prompt, /Edexcel specification/); assert.match(prompt, /mark scheme/);
-  assert.equal(r.body.questions.length, 1); assert.equal(r.body.questions[0].marks, 4); assert.equal(r.body.questions[0].exam, true);
+  assert.match(prompt, /Edexcel specification/); assert.match(prompt, /mark scheme/); assert.match(prompt, /in this order/);
+  assert.equal(r.body.questions.length, 1, "only the question that is one of the asked-for kinds survives");
+  assert.equal(r.body.questions[0].marks, 3); assert.equal(r.body.questions[0].kind, "three"); assert.equal(r.body.questions[0].exam, true);
   assert.equal(r.body.questions[0].src, "Edexcel past-paper style");
-  const q = await call(post({ topic: "Plants", count: 3, board: "AQA" }), env({ run: async (m, i) => { prompt = i.messages[1].content; return { response: JSON.stringify([{ q: "Q?", a: "A" }]) }; } }));
+  const q = await call(post({ topic: "Plants", count: 3, mode: "exam", board: "AQA" }), env({ run: async (m, i) => { prompt = i.messages[1].content; return { response: JSON.stringify([{ q: "Q?", a: "A" }]) }; } }));
   assert.match(prompt, /AQA specification/);
 });
 
@@ -110,40 +111,43 @@ test("opening the address in a browser reports what is set up, without secrets",
   assert.ok(!JSON.stringify(full.body).includes("sb_publishable"));
 });
 
-// ---------- exam multiple choice and figures ----------
+// ---------- exam multiple choice, figures and the exam-style kinds ----------
 const mcItem = { q: "Which gas is needed for photosynthesis?", marks: 1, opts: ["Oxygen", "Carbon dioxide", "Nitrogen", "Helium"], a: "B" };
-const figItem = { q: "Figure 1 shows the rate of a reaction. Describe the trend.", marks: 2, a: "rate increases; then levels off", fig: { type: "line", title: "Figure 1", labels: ["0", "1", "2", "3"], series: [{ name: "", values: [0, 5, 8, 8] }] } };
-const pieItem = { q: "Figure 1 shows how a firm spends its money. Which cost is largest?", marks: 1, a: "wages", fig: { type: "pie", labels: ["Wages", "Rent", "Stock"], values: [50, 20, 30] } };
-const written = { q: "Explain why plants need light.", marks: 3, a: "energy; photosynthesis; glucose" };
-const missing = { q: "Use the graph to find the speed at 5 s.", marks: 2, a: "12 m/s" };
+const mc2Item = { kind: "mc2", q: "Which TWO of these are products of photosynthesis?", marks: 2, opts: ["Glucose", "Oxygen", "Nitrogen", "Helium", "Methane"], a: "A, B" };
+const figItem = { kind: "three", q: "Figure 1 shows the rate of a reaction. Explain one reason the rate levels off.", marks: 3, a: "reactants used up ; so fewer collisions ; rate falls to zero", fig: { type: "line", title: "Figure 1", labels: ["0", "1", "2", "3"], series: [{ name: "", values: [0, 5, 8, 8] }] } };
+const pieItem = { kind: "three", q: "Figure 1 shows how a firm spends its money. Explain one way it could cut its largest cost.", marks: 3, a: "wages ; fewer staff ; lower costs", fig: { type: "pie", labels: ["Wages", "Rent", "Stock"], values: [50, 20, 30] } };
+const written = { kind: "three", q: "Explain one reason why plants need light.", marks: 3, a: "energy ; for photosynthesis ; to make glucose" };
+const missing = { kind: "three", q: "Use the graph to explain one reason the speed rises at 5 s.", marks: 3, a: "12 m/s ; a ; b" };
 const examBody = (extra = {}) => ({ topic: "Photosynthesis", subject: "Biology", mode: "exam", count: 5, ...extra });
 
 test("exam mode tells the AI which question types the subject's real exam has", async () => {
   stubAuth(); let prompt = "";
   const grab = env({ run: async (m, i) => { prompt = i.messages[1].content; return { response: JSON.stringify([written]) }; } });
   await call(post(examBody()), grab);
-  assert.match(prompt, /subject: Biology/); assert.match(prompt, /Multiple choice \(always 1 mark/); assert.match(prompt, /"opts"/); assert.match(prompt, /"fig"/);
+  assert.match(prompt, /subject: Biology/); assert.match(prompt, /"kind":"mc1"/); assert.match(prompt, /"opts"/); assert.match(prompt, /"fig"/);
+  assert.match(prompt, /1\. mc1, 2. mc2, 3. outline, 4. three, 5. six/, "a paper-order mix");
   assert.match(prompt, /"type":"line"/); assert.match(prompt, /"type":"scatter"/); assert.doesNotMatch(prompt, /"type":"pie"/, "no pie charts for Biology");
   assert.match(prompt, /Never refer to a diagram/);
   await call(post(examBody({ subject: "History", topic: "The Cold War" })), grab);
-  assert.doesNotMatch(prompt, /Multiple choice/); assert.doesNotMatch(prompt, /"fig"/); assert.doesNotMatch(prompt, /"opts"/);
+  assert.doesNotMatch(prompt, /"kind":"mc/); assert.doesNotMatch(prompt, /"fig"/); assert.doesNotMatch(prompt, /"opts"/); assert.match(prompt, /"kind":"six"/);
   await call(post(examBody({ subject: "Maths", topic: "Quadratics" })), grab);
-  assert.doesNotMatch(prompt, /Multiple choice/); assert.match(prompt, /"type":"scatter"/); assert.match(prompt, /"type":"pie"/);
+  assert.doesNotMatch(prompt, /"kind":"mc/); assert.match(prompt, /"type":"scatter"/); assert.match(prompt, /"type":"pie"/);
   await call(post(examBody({ subject: "", topic: "Business costs" })), grab);
-  assert.match(prompt, /Multiple choice/, "falls back to the topic when there is no subject");
+  assert.match(prompt, /"kind":"mc1"/, "falls back to the topic when there is no subject");
 });
 
 test("exam mode keeps good multiple-choice and figure questions for a subject that has them", async () => {
   stubAuth();
-  const r = await call(post(examBody()), env({ run: async () => ({ response: JSON.stringify([mcItem, figItem, written]) }) }));
+  const r = await call(post(examBody()), env({ run: async () => ({ response: JSON.stringify([figItem, written, mcItem]) }) }));
   assert.equal(r.status, 200); assert.equal(r.body.questions.length, 3);
-  assert.equal(r.body.questions[0].a, "Carbon dioxide"); assert.equal(r.body.questions[0].marks, 1); assert.deepEqual(r.body.questions[0].opts, ["Oxygen", "Carbon dioxide", "Nitrogen", "Helium"]);
-  assert.equal(r.body.questions[1].fig.type, "line"); assert.ok(r.body.questions.every((q) => q.exam));
+  const [first, second] = r.body.questions;
+  assert.equal(first.a, "Carbon dioxide"); assert.equal(first.marks, 1); assert.equal(first.kind, "mc1"); assert.deepEqual(first.opts, ["Oxygen", "Carbon dioxide", "Nitrogen", "Helium"]);
+  assert.equal(second.fig.type, "line", "put in paper order: multiple choice first"); assert.ok(r.body.questions.every((q) => q.exam));
 });
 
 test("exam mode drops special question types the subject's exam doesn't use, and questions pointing at a missing figure", async () => {
   stubAuth();
-  // History has neither multiple choice nor figures
+  // History has neither multiple choice nor figures (and none were asked for)
   const hist = await call(post(examBody({ subject: "History", topic: "Cold War" })), env({ run: async () => ({ response: JSON.stringify([mcItem, figItem, written, missing]) }) }));
   assert.deepEqual(hist.body.questions.map((q) => q.q), [written.q], "only the plain written question survives for History");
   // Biology allows line charts but not pie charts, and the broken question that points at a graph it doesn't have is dropped
@@ -152,9 +156,40 @@ test("exam mode drops special question types the subject's exam doesn't use, and
   // Business has pie charts
   const biz = await call(post(examBody({ subject: "Business", topic: "Costs" })), env({ run: async () => ({ response: JSON.stringify([pieItem]) }) }));
   assert.equal(biz.body.questions[0].fig.type, "pie");
-  // a subject we don't know gets plain written questions only
+  // a subject we don't know gets no multiple choice unless it is asked for
   const unk = await call(post(examBody({ subject: "Zoology club", topic: "Newts" })), env({ run: async () => ({ response: JSON.stringify([mcItem, written]) }) }));
   assert.deepEqual(unk.body.questions.map((q) => q.q), [written.q]);
+});
+
+test("exam mode writes exactly the kinds that were asked for — even multiple choice in a subject that doesn't usually have it", async () => {
+  stubAuth(); let prompt = "";
+  const reply = JSON.stringify([written, mc2Item, mcItem]);
+  const r = await call(post(examBody({ subject: "History", topic: "Cold War", kinds: ["mc1", "mc2"], count: 4 })), env({ run: async (m, i) => { prompt = i.messages[1].content; return { response: reply }; } }));
+  assert.match(prompt, /"kind":"mc2"/); assert.match(prompt, /1\. mc1, 2. mc1, 3. mc1, 4. mc2/, "the plan only uses the chosen kinds");
+  assert.deepEqual(r.body.questions.map((q) => q.kind), ["mc1", "mc2"], "the written question is dropped, multiple choice is kept");
+  const two = r.body.questions[1];
+  assert.deepEqual(two.answers, ["Glucose", "Oxygen"]); assert.equal(two.marks, 2); assert.equal(two.pick, 2); assert.equal(two.a, "Glucose; Oxygen");
+  // junk kinds are ignored and fall back to the subject's own mix
+  const j = await call(post(examBody({ kinds: ["nonsense"] })), env({ run: async (m, i) => { prompt = i.messages[1].content; return { response: JSON.stringify([written]) }; } }));
+  assert.equal(j.status, 200); assert.match(prompt, /1\. mc1/);
+});
+
+test("exam mode follows the plan it is given and keeps the Business case-study extract", async () => {
+  stubAuth(); let prompt = "";
+  const six = { kind: "six", q: "Analyse the impact on Kiko's Kitchen of a rise in food prices.", marks: 6, a: "Costs rise ; profit margin falls ; may raise prices ; demand could fall", ctx: "Kiko's Kitchen is a small family-run café with 6 staff." };
+  const nine = { kind: "nine", q: "Justify whether or not Kiko's Kitchen should open a second site.", marks: 9, a: "Higher revenue ; higher costs ; risk ; judgement", ctx: "Kiko's Kitchen is a small family-run café with 6 staff." };
+  const r = await call(post(examBody({ subject: "Business", topic: "Growth", plan: ["six", "nine"], kinds: ["six", "nine"], count: 2, board: "Edexcel" })), env({ run: async (m, i) => { prompt = i.messages[1].content; return { response: JSON.stringify([nine, six]) }; } }));
+  assert.match(prompt, /in this order: 1\. six, 2\. nine/); assert.match(prompt, /made-up business/); assert.match(prompt, /"ctx"/); assert.match(prompt, /Justify/);
+  assert.deepEqual(r.body.questions.map((q) => [q.kind, q.marks]), [["six", 6], ["nine", 9]], "sent back in paper order");
+  assert.match(r.body.questions[0].ctx, /Kiko's Kitchen/);
+});
+
+test("fitToPlan matches the plan, then sorts into paper order", async () => {
+  const { fitToPlan } = await import("../functions/api/generate.js");
+  const it = (kind, marks, q) => ({ exam: true, kind, marks, q, a: "x" });
+  const items = [it("nine", 9, "n"), it("three", 3, "t1"), it("three", 3, "t2"), it("six", 6, "s")];
+  assert.deepEqual(fitToPlan(items, ["six", "three", "nine"], 3).map((x) => x.q), ["t1", "s", "n"], "extras beyond the plan only fill gaps");
+  assert.deepEqual(fitToPlan(items, [], 2).map((x) => x.q), ["n", "t1"]);
 });
 
 test("quick mode is unchanged by exam formats", async () => {
