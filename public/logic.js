@@ -403,9 +403,63 @@ export function examPlan(count, kinds = EXAM_KIND_IDS) {
 }
 
 /** The kinds offered by default for a subject: everything, with multiple choice only where that subject's papers use it. */
+const ALL_K = ["mc1", "mc2", "outline", "three", "six", "nine"];
+const WRITTEN_K = ["outline", "three", "six", "nine"];
+/**
+ * Different subjects ask different kinds of question, so each gets its own profile: which kinds to offer, which are ticked
+ * to begin with, what each is called, and the command words to ask the question maker for. First match wins (subject name, then topic).
+ */
+const KIND_PROFILES = [
+  { re: /\b(maths?|mathematics|statistics|algebra|geometry|trigonometry|calculus)\b/i, offer: ["outline", "three"], on: ["outline", "three"],
+    labels: { outline: "Calculate", three: "Show that / Work out" },
+    words: { outline: "a short calculation (“Work out…”, “Calculate…”, “Simplify…”, “Solve…”). The mark scheme points are the method mark(s) and the final answer mark, e.g. “M1 for 3 × 4.5 ; A1 for 13.5”. No essay-style questions.",
+             three: "a multi-step question (“Show that…”, “Work out the area/probability/value…”). Three points: two method marks then the accuracy (answer) mark." },
+    note: "Maths: calculation questions, marked on method and answer." },
+  { re: /\b(english|literature|lit|drama|poetry|shakespeare)\b/i, offer: WRITTEN_K, on: WRITTEN_K,
+    labels: { outline: "Identify / Quote", three: "Explain one effect", six: "Analyse the writer's methods", nine: "Evaluate / How far" },
+    words: { outline: "“Identify one word or phrase that shows… and say what it suggests” (point + linked comment)", three: "“Explain one effect of the writer's use of…” (identify the method, quote or refer to it, explain the effect)", six: "“Analyse how the writer uses language/structure to…” (points on methods, with short quotations and their effects)", nine: "“How far do you agree that…?” or “Evaluate the writer's presentation of…” with a supported judgement" },
+    note: "English: analysis of methods and effects. Multiple choice isn't used." },
+  { re: /\b(history|religious|r\.?e\.?|philosophy|ethics|politics|citizenship|classics|theology)\b/i, offer: WRITTEN_K, on: WRITTEN_K,
+    labels: { outline: "Describe one", three: "Explain one", six: "Explain why", nine: "How far do you agree" },
+    words: { outline: "“Describe one feature of…” / “Outline one…” (a fact plus a linked detail)", three: "“Explain one reason why / one way in which…” (identify, then develop with accurate detail)", six: "“Explain why…” or “Explain the importance of…” with specific, accurate knowledge and linked reasons", nine: "“How far do you agree that…?” / “Evaluate the view that…” weighing both sides to a supported judgement" },
+    note: "Essay-style subject: no multiple choice by default." },
+  { re: /\b(biology|chemistry|physics|geology|astronomy|(combined|triple|applied|natural|environmental|earth|forensic)?\s*science)\b/i, offer: ALL_K, on: ["mc1", "mc2", "outline", "three", "six"],
+    labels: { outline: "State / Describe one", three: "Explain / Calculate", six: "Describe and explain", nine: "Evaluate" },
+    words: { outline: "“State one…”, “Name…”, “Describe one…” (a short factual point plus a linked detail)", three: "“Explain one…” or a short calculation with units (identify, then develop; or two method marks and an answer mark)", six: "“Describe and explain…” or “Evaluate…” extended answer, using correct scientific terms in a logical sequence", nine: "“Evaluate…” a 9-mark extended answer weighing evidence to a conclusion (uncommon in sciences)" },
+    note: "Sciences: lots of short questions, calculations and a 6-mark extended answer." },
+  { re: /\bgeography\b/i, offer: ALL_K, on: ALL_K,
+    labels: { outline: "Describe one", three: "Explain one", six: "Explain / Assess", nine: "Evaluate" },
+    words: { outline: "“Describe one…” / “Suggest one…” (a point plus a linked detail, using the case study or data if given)", three: "“Explain one way/reason…” (identify, then develop)", six: "“Explain…” / “Assess…” with place-specific detail and linked reasons", nine: "“To what extent…?” / “Evaluate…” with a justified conclusion" },
+    note: "Geography: tables and graphs often come with the questions." },
+  { re: /\b(economics|business)\b/i, offer: ALL_K, on: ALL_K,
+    labels: { outline: "Outline one", three: "Explain one", six: "Analyse / Discuss", nine: "Justify" },
+    words: {}, note: "Business and Economics: case-study questions set around a made-up business." },
+  { re: /\b(psychology|sociology)\b/i, offer: ALL_K, on: ALL_K,
+    labels: { outline: "Outline one", three: "Explain one", six: "Discuss", nine: "Evaluate" },
+    words: { outline: "“Outline one…” (a point plus a linked detail, naming the study, theory or concept)", three: "“Explain one…” (identify, then develop, with the study/theory)", six: "“Discuss…” with accurate studies or theories and reasoning", nine: "“Evaluate…” with strengths, limitations and a conclusion" },
+    note: "Psychology and Sociology: studies, theories and evaluation." },
+  { re: /\b(computer science|computing|ict|information technology)\b/i, offer: ALL_K, on: ["mc1", "mc2", "outline", "three", "six"],
+    labels: { outline: "State / Describe", three: "Explain / Trace", six: "Discuss", nine: "Evaluate" },
+    words: { outline: "“State…”, “Describe one…” (a fact plus a linked detail)", three: "“Explain one…”, or trace or complete a short piece of pseudocode (3 points)", six: "“Discuss…” the benefits, drawbacks or impact, with technical detail", nine: "“Evaluate…” to a justified conclusion" },
+    note: "Computer science: multiple choice, short technical answers and a discuss question." },
+  { re: /\b(pe|p\.e\.|physical education|sport|design (and|&) technology|d&t|food (technology|preparation)|engineering)\b/i, offer: ALL_K, on: ["mc1", "mc2", "outline", "three", "six"],
+    labels: {}, words: {}, note: "" },
+];
+const DEFAULT_PROFILE = { offer: WRITTEN_K, on: WRITTEN_K, labels: {}, words: {}, note: "" };
+/** The question-kind profile for a subject (pass the subject name, then the topic as a fallback). */
+export function examProfile(...names) {
+  for (const n of names) {
+    const text = String(n ?? "");
+    if (!text.trim()) continue;
+    for (const p of KIND_PROFILES) if (p.re.test(text)) return { offer: p.offer, on: p.on, labels: p.labels, words: p.words, note: p.note };
+  }
+  return { ...DEFAULT_PROFILE };
+}
+/** What this subject calls a kind of question, e.g. "Calculate" in Maths or "Justify" in Business. */
+export const kindLabel = (kind, profile) => (profile && profile.labels && profile.labels[kind]) || (EXAM_KINDS[kind] ? EXAM_KINDS[kind].label : "");
+/** The kinds ticked by default for a subject: the ones its real papers use. */
 export function defaultExamKinds(...names) {
-  const mc = examFormats(...names).mc;
-  return EXAM_KIND_IDS.filter((k) => mc || (k !== "mc1" && k !== "mc2"));
+  return examProfile(...names).on.slice();
 }
 
 /** True for Business subjects, whose long questions are set around a made-up business (as on the Edexcel papers). */
@@ -415,7 +469,7 @@ export const isBusinessSubject = (...names) => names.some((n) => /\bbusiness\b/i
  * What to tell a question-writing AI about each kind: the JSON shape and the rules real papers follow.
  * Used by both the built-in question maker (server) and the "copy a prompt for another AI" text.
  */
-export function examKindGuide(kind, { business = false } = {}) {
+export function examKindGuide(kind, { business = false, words = {} } = {}) {
   const ctxNote = business
     ? ` Set it in ONE made-up business that you introduce in "ctx" (2–4 sentences: its name, what it sells or does, and one or two facts — e.g. size, location, a recent change, a figure) and name that business in the question.`
     : ` If the question needs a scenario, add it as a short "ctx" (1–3 sentences); otherwise leave "ctx" out.`;
@@ -446,7 +500,10 @@ export function examKindGuide(kind, { business = false } = {}) {
       rules: `9-mark extended-response question that ends in a justified judgement (${business ? "command words: Justify which one of …, or Justify whether or not …" : "command words: Evaluate, Justify, To what extent, Assess"}).${levelNote(9)}${business ? ctxNote : ""}`,
     },
   };
-  return guides[kindId(kind)] || null;
+  const g = guides[kindId(kind)];
+  if (!g) return null;
+  const w = words && words[kindId(kind)];
+  return w ? { shape: g.shape, rules: `${g.rules} In THIS subject write it as: ${w}` } : g;
 }
 
 const asNum = (v) => { const n = typeof v === "string" ? Number(v.replace(/,/g, "").trim()) : v; return typeof n === "number" && Number.isFinite(n) && Math.abs(n) < 1e9 ? Math.round(n * 1e6) / 1e6 : null; };
@@ -869,7 +926,8 @@ export function buildAiPrompt({ topic, level = "GCSE", count = 15, style = "mixe
     const plan = examPlan(Math.min(n, 20), want.length ? want : EXAM_KIND_IDS);
     const used = PAPER_ORDER.filter((k) => plan.includes(k));
     const counts = used.map((k) => `${plan.filter((x) => x === k).length} × ${EXAM_KINDS[k].marks}-mark ${EXAM_KINDS[k].label.toLowerCase()}`).join(", ");
-    const guides = used.map((k) => examKindGuide(k, { business }));
+    const prof = examProfile(subject, topic);
+    const guides = used.map((k) => examKindGuide(k, { business, words: prof.words }));
     return `Write ${plan.length} exam-style questions about "${t}"${clean(subject) ? ` (subject: ${clean(subject)})` : ""} at ${lvl} level, laid out like a real exam paper: ${counts}.${tailor}
 
 Reply with ONLY a JSON array, in the order a paper would run (shortest first). Use these shapes:

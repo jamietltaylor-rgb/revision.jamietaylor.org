@@ -26,7 +26,7 @@ let lastChest = null;
 const auth = { mode: "in", username: "", password: "", confirm: "", error: "", busy: false };
 const draft = {
   subjectId: "", newSubject: "", q: "", a: "", wrong: "",
-  topic: "", level: "GCSE", count: "10", style: "mixed", busy: false, progress: "", aiError: "", prompt: "", paper: false, board: "Any exam board", boardInit: false, mode: "quick", kinds: null,
+  topic: "", level: "GCSE", count: "10", style: "mixed", busy: false, progress: "", aiError: "", prompt: "", paper: false, board: "Any exam board", boardInit: false, mode: "quick", kinds: null, allKinds: false,
   pet: "buddy", paste: "", preview: null, filter: "all", search: "", treatName: "", treatCost: "",
 };
 
@@ -830,7 +830,7 @@ const markWord = (n) => `${n} mark${n === 1 ? "" : "s"}`;
 const correctLabels = (q) => (q.answers && q.answers.length ? q.answers : [q.a]).map((a) => optLabel(q, a)).join("  +  ");
 /** A short name for what kind of exam question this is, e.g. "Outline one" or "Justify". */
 const KIND_TAG = { mc1: "Multiple choice", mc2: "Select two", outline: "Outline one", three: "Explain one", six: "Analyse / Discuss", nine: "Justify" };
-const kindTag = (q) => KIND_TAG[L.examKindOf(q)] || "";
+const kindTag = (q, subjectName = "") => { const k = L.examKindOf(q); return k === "other" || !k ? "" : subjectName ? L.kindLabel(k, L.examProfile(subjectName)) : KIND_TAG[k] || ""; };
 /** The short business or scenario extract a case-study question is set around. */
 const ctxView = (q) => (q.ctx ? h("blockquote", { class: "case" }, h("span", { class: "case-label" }, "Case study"), q.ctx) : null);
 const kindPlaceholder = (q) => ({
@@ -859,7 +859,7 @@ function viewQuestion() {
     bar(Math.round((session.index / total) * 100), "Round progress"));
 
   const body = h("div", {},
-    h("div", { class: "row", style: "margin-top:.8rem" }, h("span", { class: "tag" }, subject ? subject.name : "Question"), q.exam && h("span", { class: "tag" }, `📝 ${markWord(q.marks)}`), q.exam && kindTag(q) && h("span", { class: "tag" }, kindTag(q)), q.src && h("span", { class: "tag" }, `📄 ${q.src}`), item.retry && h("span", { class: "tag" }, "Second chance — no points")),
+    h("div", { class: "row", style: "margin-top:.8rem" }, h("span", { class: "tag" }, subject ? subject.name : "Question"), q.exam && h("span", { class: "tag" }, `📝 ${markWord(q.marks)}`), q.exam && kindTag(q, subject && subject.name) && h("span", { class: "tag" }, kindTag(q, subject && subject.name)), q.src && h("span", { class: "tag" }, `📄 ${q.src}`), item.retry && h("span", { class: "tag" }, "Second chance — no points")),
     ctxView(q),
     h("p", { class: "quiz-q" }, q.q),
     q.opts && q.opts.length && q.answers && h("p", { class: "small muted", style: "margin:-.4rem 0 .6rem" }, "Select two answers."),
@@ -1007,7 +1007,7 @@ async function submitExam(written) {
   let result;
   try {
     if (!cloud.signedIn) throw new Error("local");
-    result = { ...(await cloud.markAnswer({ q: q.q, a: q.a, marks: q.marks, answer: given, kind: L.examKindOf(q), ...(q.ctx ? { ctx: q.ctx } : {}) })), source: "ai" };
+    result = { ...(await cloud.markAnswer({ q: q.q, a: q.a, marks: q.marks, answer: given, kind: L.examKindOf(q), subject: ((state.subjects.find((s) => s.id === q.subjectId) || {}).name) || "", ...(q.ctx ? { ctx: q.ctx } : {}) })), source: "ai" };
   } catch {
     result = { ...L.markLocally(given, q.a, q.marks, L.examKindOf(q)), feedback: "", source: "local" };
   }
@@ -1362,13 +1362,13 @@ function viewQuestions() {
         state.subjects.map((s) => h("option", { value: s.id, selected: s.id === draft.subjectId }, s.name)),
         h("option", { value: "__new", selected: draft.subjectId === "__new" }, "＋ New subject…"))),
     (draft.subjectId === "__new" || !state.subjects.length) && h("label", {}, "New subject name",
-      h("input", { type: "text", maxlength: 60, placeholder: "e.g. Biology (leave blank to use the topic below)", value: draft.newSubject, oninput: (e) => { draft.newSubject = e.target.value; } })));
+      h("input", { type: "text", maxlength: 60, placeholder: "e.g. Biology (leave blank to use the topic below)", value: draft.newSubject, oninput: (e) => { draft.newSubject = e.target.value; }, onchange: () => { if (draft.mode === "exam") render(); } })));
 
   const opt = (value, label, current) => h("option", { value, selected: value === current }, label);
   const makeCard = h("section", { class: "card" },
     h("h2", {}, "Make questions on a topic"),
     h("p", { class: "muted small" }, "Type what you're revising and the app can write the questions for you — or copy a ready-made prompt for any other AI."),
-    h("label", {}, "Topic", h("input", { type: "text", maxlength: 120, placeholder: "e.g. Photosynthesis, or The causes of World War 1", value: draft.topic, oninput: (e) => { draft.topic = e.target.value; },
+    h("label", {}, "Topic", h("input", { type: "text", maxlength: 120, placeholder: "e.g. Photosynthesis, or The causes of World War 1", value: draft.topic, oninput: (e) => { draft.topic = e.target.value; }, onchange: () => { if (draft.mode === "exam") render(); },
       onkeydown: (e) => { if (e.key === "Enter" && cloud.enabled) makeWithAi(); } })),
     h("div", { class: "grid2" },
       h("label", {}, "Level", h("select", { onchange: (e) => { draft.level = e.target.value; } }, L.LEVELS.map((x) => opt(x, x, draft.level)))),
@@ -1382,6 +1382,9 @@ function viewQuestions() {
     draft.mode === "exam" && h("p", { class: "small muted", style: "margin:0 0 .6rem" }, "Questions set the way real papers set them, with a mark scheme. You write your answer and the app marks it for you (6 and 9 markers are marked in levels, like the real thing). They're saved as their own topic, like “Biology – Exam questions”, so they stay separate from your quick questions."),
     draft.mode === "exam" && (() => {
       const chosen = examKinds();
+      const prof = L.examProfile(chosenSubjectName(), draft.topic);
+      const shown = L.EXAM_KIND_IDS.filter((k) => draft.allKinds || prof.offer.includes(k) || chosen.includes(k));
+      const hidden = L.EXAM_KIND_IDS.length - shown.length;
       const toggle = (k) => {
         const now = new Set(chosen);
         if (now.has(k)) { if (now.size === 1) return toast("Keep at least one type ticked."); now.delete(k); } else now.add(k);
@@ -1389,15 +1392,16 @@ function viewQuestions() {
         render();
       };
       const plan = L.examPlan(wantedCount(), chosen);
-      const mix = L.EXAM_KIND_IDS.filter((k) => plan.includes(k)).map((k) => `${plan.filter((x) => x === k).length} × ${L.EXAM_KINDS[k].label.toLowerCase()} (${L.EXAM_KINDS[k].marks})`).join(", ");
+      const mix = L.EXAM_KIND_IDS.filter((k) => plan.includes(k)).map((k) => `${plan.filter((x) => x === k).length} × ${L.kindLabel(k, prof).toLowerCase()} (${L.EXAM_KINDS[k].marks})`).join(", ");
       const f = L.examFormats(chosenSubjectName(), draft.topic);
       return h("div", { style: "margin:0 0 .7rem" },
-        h("div", { class: "small", style: "font-weight:700;margin-bottom:.35rem" }, "Which kinds of question?"),
-        h("div", { class: "chips", role: "group", "aria-label": "Kinds of exam question" }, L.EXAM_KIND_IDS.map((k) => h("button", { type: "button", class: "chip" + (chosen.includes(k) ? " on" : ""), "aria-pressed": chosen.includes(k) ? "true" : "false", onclick: () => toggle(k) },
-          `${L.EXAM_KINDS[k].label} (${L.EXAM_KINDS[k].marks})`))),
+        h("div", { class: "small", style: "font-weight:700;margin-bottom:.35rem" }, `Which kinds of ${chosenSubjectName() || draft.topic ? "question for this subject" : "question"}?`),
+        prof.note && h("p", { class: "small muted", style: "margin:0 0 .4rem" }, prof.note),
+        h("div", { class: "chips", role: "group", "aria-label": "Kinds of exam question" }, shown.map((k) => h("button", { type: "button", class: "chip" + (chosen.includes(k) ? " on" : ""), "aria-pressed": chosen.includes(k) ? "true" : "false", onclick: () => toggle(k) },
+          `${L.kindLabel(k, prof)} (${L.EXAM_KINDS[k].marks})`))),
+        hidden > 0 && h("p", { class: "small", style: "margin:.4rem 0 0" }, h("button", { type: "button", class: "ghost", style: "min-height:34px;padding:.2rem .7rem", onclick: () => { draft.allKinds = true; render(); } }, `Show ${hidden} more kind${hidden === 1 ? "" : "s"} (not usual in this subject)`)),
         h("p", { class: "small muted", style: "margin:.45rem 0 0" }, `You’ll get a paper-style mix: ${mix}.`),
-        L.isBusinessSubject(chosenSubjectName(), draft.topic) && h("p", { class: "small muted", style: "margin:.25rem 0 0" }, "Business: the “Outline one”, “Analyse” and “Justify” questions are set around a made-up business with a short case-study extract, like the Edexcel papers."),
-        !f.mc && (chosen.includes("mc1") || chosen.includes("mc2")) && h("p", { class: "small muted", style: "margin:.25rem 0 0" }, "Multiple choice isn't usual in this subject's real exam, but you ticked it so I'll include it."),
+        L.isBusinessSubject(chosenSubjectName(), draft.topic) && h("p", { class: "small muted", style: "margin:.25rem 0 0" }, "The “Outline one”, “Analyse” and “Justify” questions are set around a made-up business with a short case-study extract, like the Edexcel papers."),
         f.figures.length > 0 && h("p", { class: "small muted", style: "margin:.25rem 0 0" }, `Some questions may also come with a ${f.figures.map((x) => (x === "table" ? "table" : x + " chart")).join(", ").replace(/line chart/, "line graph").replace(/scatter chart/, "scatter graph")}.`));
     })(),
     h("p", { class: "small muted", style: "margin:0 0 .4rem" }, draft.board !== "Any exam board" ? `Questions will follow the ${draft.board} specification. Your board is remembered.` : "Pick your exam board and the questions will follow its specification. It's remembered for next time."),
@@ -1441,7 +1445,7 @@ function viewQuestions() {
           it.opts && h("span", { class: "a" }, it.opts.map((o, i) => `${LETTERS[i]}. ${o}`).join("    ")),
           it.ctx && h("span", { class: "a" }, `Case study: ${it.ctx}`),
           h("span", { class: "a" }, `${it.opts ? (it.answers ? "Correct answers" : "Correct answer") : it.exam ? `Mark scheme (${markWord(it.marks)})` : "Answer"}: ${it.opts ? correctLabels(it) : it.a}${it.choices && it.choices.length ? `  ·  wrong options: ${it.choices.join(", ")}` : ""}`),
-          it.exam && h("span", { class: "tag" }, `${it.opts ? "🔠 " : "📝 "}${kindTag(it) ? kindTag(it) + " · " : ""}${markWord(it.marks)}`), it.fig && h("span", { class: "tag" }, `📊 ${it.fig.type === "table" ? "table" : it.fig.type + " chart"}`),
+          it.exam && h("span", { class: "tag" }, `${it.opts ? "🔠 " : "📝 "}${kindTag(it, chosenSubjectName()) ? kindTag(it, chosenSubjectName()) + " · " : ""}${markWord(it.marks)}`), it.fig && h("span", { class: "tag" }, `📊 ${it.fig.type === "table" ? "table" : it.fig.type + " chart"}`),
           it.duplicate && h("span", { class: "tag" }, "already in this subject")))),
       h("div", { class: "row", style: "margin-top:.8rem" },
         h("button", { class: "primary", onclick: addPreview }, `Add ${plural(picked, "question")}`),
@@ -1465,7 +1469,7 @@ function viewQuestions() {
     listBox.replaceChildren(...[
       shown.length === 0 && h("p", { class: "muted" }, state.questions.length ? "No questions match." : "No questions yet."),
       ...shown.slice(0, 150).map((q) => h("div", { class: "item" },
-        h("div", { class: "txt" }, h("div", {}, q.q), q.exam && h("div", { class: "small muted" }, `📝 ${kindTag(q) ? kindTag(q) + " · " : ""}${markWord(q.marks)}`),
+        h("div", { class: "txt" }, h("div", {}, q.q), q.exam && h("div", { class: "small muted" }, `📝 ${kindTag(q, ((state.subjects.find((s) => s.id === q.subjectId) || {}).name) || "") ? kindTag(q, ((state.subjects.find((s) => s.id === q.subjectId) || {}).name) || "") + " · " : ""}${markWord(q.marks)}`),
           q.ctx && h("div", { class: "a" }, `Case study: ${q.ctx}`),
           h("div", { class: "a" }, q.opts ? `Multiple choice — correct: ${correctLabels(q)}` : q.exam ? `Mark scheme (${markWord(q.marks)}): ${q.a}` : `Answer: ${q.a}${q.choices.length ? "  ·  multiple choice" : ""}`),
           q.fig && h("div", { class: "small muted" }, `📊 Includes a ${q.fig.type === "table" ? "table" : q.fig.type + " chart"}${q.fig.title ? ": " + q.fig.title : ""}`),

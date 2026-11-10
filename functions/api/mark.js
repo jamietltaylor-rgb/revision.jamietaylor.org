@@ -36,7 +36,10 @@ function readRequest(body) {
   if (kind === "mc1" || kind === "mc2") kind = "";
   const extended = marks >= 6; // 6- and 9-mark answers are marked in levels
   if (!kind) kind = extended ? (marks >= 9 ? "nine" : "six") : "";
-  return { q, points, answer, marks, kind, ctx, extended };
+  const subject = String(body.subject || "").slice(0, 60);
+  const maths = /\b(maths?|mathematics|statistics|algebra)\b/i.test(subject);
+  if (maths && !extended) kind = ""; // calculations are marked on method and answer, not on "linked points"
+  return { q, points, answer, marks, kind, ctx, extended, maths };
 }
 
 const SYSTEM = "You are a fair, careful exam marker for UK school exams. You reply with one JSON object and nothing else.";
@@ -45,8 +48,10 @@ function context(ctx) {
   return ctx ? `\nSCENARIO GIVEN WITH THE QUESTION: ${ctx}\n` : "";
 }
 
-function pointsMessages({ q, points, answer, marks, kind, ctx }) {
-  const linked = kind === "outline"
+function pointsMessages({ q, points, answer, marks, kind, ctx, maths }) {
+  const linked = maths
+    ? `\nThis is a maths question. Method marks (M) are earned for a correct method or a correct step even if there is an arithmetic slip; accuracy/answer marks (A) need the correct value (with units if asked). Follow through a student's own earlier slip if the later method is right. A correct final answer with no working earns full marks unless the question says "show".\n`
+    : kind === "outline"
     ? `\nThis is an "Outline" question: award the first mark for a valid point that is appropriate to the question${ctx ? " and to the business in the scenario" : ""}, and the second mark only for a point that is LINKED to it (it explains or develops it: because…, so…, which means…). A list of unlinked points earns at most 1 mark.\n`
     : kind === "three"
       ? `\nThis is an "Explain one" question: 1 mark for identifying a valid point, then up to 2 more marks for developing that same point (each step extends the last: why or how it happens, and what that leads to). Development marks are only awarded for developing an identified valid point. A list of several points with no explanation earns at most 1 mark.\n`

@@ -2,7 +2,7 @@
 // Writes revision questions with Cloudflare's free Workers AI, for signed-in users only.
 // Setup: README step 4 (add an "AI" binding, plus SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY variables).
 
-import { parseQuestionList, BOARDS, boardLine, examFormats, refersToMissingFigure, EXAM_KINDS, kindId, examKindOf, examPlan, examKindGuide, defaultExamKinds, isBusinessSubject } from "../../public/logic.js";
+import { parseQuestionList, BOARDS, boardLine, examFormats, refersToMissingFigure, EXAM_KINDS, kindId, examKindOf, examPlan, examKindGuide, defaultExamKinds, examProfile, isBusinessSubject } from "../../public/logic.js";
 
 const MODELS = ["@cf/meta/llama-3.3-70b-instruct-fp8-fast", "@cf/meta/llama-3.1-8b-instruct"];
 const STYLES = ["typed", "choice", "mixed"];
@@ -67,7 +67,8 @@ function buildExamMessages({ topic, level, count, avoid = [], paper = false, boa
   const business = isBusinessSubject(subject, topic);
   const order = plan.length ? plan : examPlan(count, kinds);
   const used = PAPER_ORDER.filter((k) => order.includes(k));
-  const guides = used.map((k) => ({ k, ...examKindGuide(k, { business }) }));
+  const prof = examProfile(subject, topic);
+  const guides = used.map((k) => ({ k, ...examKindGuide(k, { business, words: prof.words }) }));
   const figN = f.figures.length && order.length >= 3 ? Math.max(1, Math.round(order.length * 0.25)) : 0;
   const figures = f.figures.length ? `
 Any question may also carry a "fig" object holding data it needs, shaped like one of:

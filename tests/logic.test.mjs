@@ -705,3 +705,19 @@ test("6 and 9 mark answers are placed in a level, then given a mark inside it", 
   assert.equal(L.markLocally("Higher prices increase revenue per sale; competitors may undercut so sales fall", scheme, 3).awarded, 2);
   assert.equal(L.markLocally("Higher prices increase revenue per sale", scheme, 3).level, undefined);
 });
+
+test("each subject gets its own kinds of question, names and command words", () => {
+  const maths = L.examProfile("Maths", "Quadratics");
+  assert.deepEqual(maths.offer, ["outline", "three"]); assert.equal(L.kindLabel("outline", maths), "Calculate"); assert.deepEqual(L.defaultExamKinds("Maths"), ["outline", "three"]);
+  const hist = L.examProfile("History");
+  assert.deepEqual(hist.on, ["outline", "three", "six", "nine"]); assert.equal(L.kindLabel("nine", hist), "How far do you agree");
+  assert.deepEqual(L.defaultExamKinds("Biology"), ["mc1", "mc2", "outline", "three", "six"]);
+  assert.deepEqual(L.defaultExamKinds("Business"), L.EXAM_KIND_IDS);
+  assert.equal(L.kindLabel("six", L.examProfile("Business")), "Analyse / Discuss");
+  assert.deepEqual(L.defaultExamKinds("", "the French revolution"), ["outline", "three", "six", "nine"], "unknown subjects get the written kinds");
+  assert.equal(L.kindLabel("mc1", L.examProfile("History")), "Multiple choice");
+  // the subject's own command words reach the prompt
+  assert.match(L.buildAiPrompt({ topic: "Quadratics", mode: "exam", subject: "Maths", count: 4 }), /Work out/);
+  assert.doesNotMatch(L.buildAiPrompt({ topic: "Quadratics", mode: "exam", subject: "Maths", count: 4 }), /"kind":"six"/);
+  assert.match(L.buildAiPrompt({ topic: "WW1", mode: "exam", subject: "History", count: 4 }), /How far do you agree/);
+});
