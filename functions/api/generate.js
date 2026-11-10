@@ -68,7 +68,7 @@ function buildExamMessages({ topic, level, count, avoid = [], paper = false, boa
   const order = plan.length ? plan : examPlan(count, kinds);
   const used = PAPER_ORDER.filter((k) => order.includes(k));
   const prof = examProfile(subject, topic);
-  const guides = used.map((k) => ({ k, ...examKindGuide(k, { business, words: prof.words }) }));
+  const guides = used.map((k) => ({ k, ...examKindGuide(k, { business, words: prof.words, ctxRule: prof.ctxRule, ctxFor: prof.ctxFor }) }));
   const figN = f.figures.length && order.length >= 3 ? Math.max(1, Math.round(order.length * 0.25)) : 0;
   const figures = f.figures.length ? `
 Any question may also carry a "fig" object holding data it needs, shaped like one of:

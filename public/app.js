@@ -832,8 +832,9 @@ const correctLabels = (q) => (q.answers && q.answers.length ? q.answers : [q.a])
 const KIND_TAG = { mc1: "Multiple choice", mc2: "Select two", outline: "Outline one", three: "Explain one", six: "Analyse / Discuss", nine: "Justify" };
 const kindTag = (q, subjectName = "") => { const k = L.examKindOf(q); return k === "other" || !k ? "" : subjectName ? L.kindLabel(k, L.examProfile(subjectName)) : KIND_TAG[k] || ""; };
 /** The short business or scenario extract a case-study question is set around. */
-const ctxView = (q) => (q.ctx ? h("blockquote", { class: "case" }, h("span", { class: "case-label" }, "Case study"), q.ctx) : null);
-const kindPlaceholder = (q) => ({
+const isEnglishLang = (name = "") => /\b(english|language)\b/i.test(name) && !/literature/i.test(name);
+const ctxView = (q, name = "") => (q.ctx ? h("blockquote", { class: "case" }, h("span", { class: "case-label" }, isEnglishLang(name) ? "Extract" : "Case study"), q.ctx) : null);
+const kindPlaceholder = (q, name = "") => (isEnglishLang(name) && L.examKindOf(q) === "nine" ? "Write your answer in full: think about your audience and purpose, use paragraphs, and check your spelling and punctuation" : isEnglishLang(name) && L.examKindOf(q) === "six" ? "Pick 2–3 methods the writer uses. For each: quote a short phrase, name the method, and explain its effect on the reader" : {
   outline: "Write one point, then link it to a second (because… / so… / which means…)",
   three: "Identify one point, then develop it: explain why or how, and what that leads to",
   six: "Make 2–3 points. For each one, explain it in the context of the question (because… which means… so…)",
@@ -860,7 +861,7 @@ function viewQuestion() {
 
   const body = h("div", {},
     h("div", { class: "row", style: "margin-top:.8rem" }, h("span", { class: "tag" }, subject ? subject.name : "Question"), q.exam && h("span", { class: "tag" }, `📝 ${markWord(q.marks)}`), q.exam && kindTag(q, subject && subject.name) && h("span", { class: "tag" }, kindTag(q, subject && subject.name)), q.src && h("span", { class: "tag" }, `📄 ${q.src}`), item.retry && h("span", { class: "tag" }, "Second chance — no points")),
-    ctxView(q),
+    ctxView(q, subject && subject.name),
     h("p", { class: "quiz-q" }, q.q),
     q.opts && q.opts.length && q.answers && h("p", { class: "small muted", style: "margin:-.4rem 0 .6rem" }, "Select two answers."),
     q.fig && figureView(q.fig));
@@ -900,11 +901,11 @@ function viewQuestion() {
     }
     if (session.stage === "ask") {
       const long = q.marks >= 6;
-      const box = h("textarea", { id: "answer", maxlength: 4000, style: `min-height:${long ? 15 : q.marks >= 3 ? 9 : 6}rem`, placeholder: kindPlaceholder(q), "aria-label": "Your answer" });
+      const box = h("textarea", { id: "answer", maxlength: 4000, style: `min-height:${long ? 15 : q.marks >= 3 ? 9 : 6}rem`, placeholder: kindPlaceholder(q, subject && subject.name), "aria-label": "Your answer" });
       const words = h("span", { class: "small muted" }, "0 words");
       box.addEventListener("input", () => { const n = (box.value.match(/\S+/g) || []).length; words.textContent = `${n} word${n === 1 ? "" : "s"}`; });
       body.append(box, long && h("div", { class: "row", style: "margin-top:.3rem" }, words,
-        h("span", { class: "small muted" }, q.marks >= 9 ? "Marked in levels — explain your points and finish with a justified judgement." : "Marked in levels — explain each point, don't just list.")),
+        h("span", { class: "small muted" }, q.marks >= 9 ? (isEnglishLang(subject && subject.name) ? "Marked in levels — content, organisation and accurate spelling, punctuation and grammar." : "Marked in levels — explain your points and finish with a justified judgement.") : "Marked in levels — explain each point, don't just list.")),
         h("div", { class: "row", style: "margin-top:.7rem" },
         h("button", { class: "primary", onclick: () => submitExam(box.value) }, "Mark my answer"),
         h("button", { class: "ghost", onclick: () => submitExam("") }, "I don't know")));

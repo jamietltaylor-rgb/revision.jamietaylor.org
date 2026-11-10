@@ -26,7 +26,7 @@ function readRequest(body) {
   const q = String(body && body.q || "").replace(/\s+/g, " ").trim().slice(0, 800);
   const scheme = String(body && body.a || "").trim().slice(0, 1200);
   const answer = String(body && body.answer || "").trim().slice(0, 4000);
-  const ctx = String(body && body.ctx || "").replace(/\s+/g, " ").trim().slice(0, 700);
+  const ctx = String(body && body.ctx || "").replace(/\s+/g, " ").trim().slice(0, 1200);
   const marks = Math.max(1, Math.min(12, Math.round(Number(body && body.marks)) || 0));
   if (!q || !scheme || !body || !Number(body.marks)) return { error: "That request wasn't valid." };
   if (!answer) return { error: "Write an answer first." };
@@ -37,18 +37,19 @@ function readRequest(body) {
   const extended = marks >= 6; // 6- and 9-mark answers are marked in levels
   if (!kind) kind = extended ? (marks >= 9 ? "nine" : "six") : "";
   const subject = String(body.subject || "").slice(0, 60);
+  const english = /\b(english|language)\b/i.test(subject) && !/literature/i.test(subject);
   const maths = /\b(maths?|mathematics|statistics|algebra)\b/i.test(subject);
   if (maths && !extended) kind = ""; // calculations are marked on method and answer, not on "linked points"
-  return { q, points, answer, marks, kind, ctx, extended, maths };
+  return { q, points, answer, marks, kind, ctx, extended, maths, english };
 }
 
 const SYSTEM = "You are a fair, careful exam marker for UK school exams. You reply with one JSON object and nothing else.";
 
-function context(ctx) {
-  return ctx ? `\nSCENARIO GIVEN WITH THE QUESTION: ${ctx}\n` : "";
+function context(ctx, english) {
+  return ctx ? `\n${english ? "EXTRACT THE STUDENT WAS GIVEN" : "SCENARIO GIVEN WITH THE QUESTION"}: ${ctx}\n` : "";
 }
 
-function pointsMessages({ q, points, answer, marks, kind, ctx, maths }) {
+function pointsMessages({ q, points, answer, marks, kind, ctx, maths, english }) {
   const linked = maths
     ? `\nThis is a maths question. Method marks (M) are earned for a correct method or a correct step even if there is an arithmetic slip; accuracy/answer marks (A) need the correct value (with units if asked). Follow through a student's own earlier slip if the later method is right. A correct final answer with no working earns full marks unless the question says "show".\n`
     : kind === "outline"
@@ -62,7 +63,7 @@ function pointsMessages({ q, points, answer, marks, kind, ctx, maths }) {
 `Mark a student's answer using the mark scheme.
 
 QUESTION (${marks} marks): ${q}
-${context(ctx)}${linked}
+${context(ctx, english)}${linked}
 MARK SCHEME (numbered marking points; award a point when the student's answer clearly makes that point, in any wording, even if it is spelled badly or phrased differently):
 ${points.map((p, i) => `${i + 1}. ${p}`).join("\n")}
 
@@ -76,24 +77,38 @@ Be fair: do not require exact wording, and accept a different valid point from t
   ];
 }
 
-function levelMessages({ q, points, answer, marks, kind, ctx }) {
+function levelMessages({ q, points, answer, marks, kind, ctx, english }) {
   const bands = levelBands(marks);
   const nine = marks >= 9 || kind === "nine";
+  const writing = english && nine; // English Language: the 9-mark question is a writing task
+  const levels = writing
+    ? `- Level 0 (0 marks): nothing rewardable.
+- Level 1 (${bands[0][0]}–${bands[0][1]} marks): simple, partly suited to the audience and purpose; basic structure; frequent errors in spelling, punctuation or grammar.
+- Level 2 (${bands[1][0]}–${bands[1][1]} marks): clear and mostly suited to the audience, form and purpose; sensible paragraphs; some range of vocabulary and devices; mostly accurate.
+- Level 3 (${bands[2][0]}–${bands[2][1]} marks): convincing and well suited to audience, form and purpose; well-organised and linked; ambitious vocabulary and deliberate devices; accurate spelling, punctuation and grammar.
+Mark content and organisation together with technical accuracy. This is a writing task, so judge the quality of the writing itself, not whether it matches the indicative content exactly.`
+    : english
+      ? `- Level 0 (0 marks): nothing relevant.
+- Level 1 (${bands[0][0]}–${bands[0][1]} marks): simple comments on the extract; few or no quotations; little on the effect on the reader.
+- Level 2 (${bands[1][0]}–${bands[1][1]} marks): some relevant analysis of the writer's methods with suitable quotations and some comment on their effects.
+- Level 3 (${bands[2][0]}–${bands[2][1]} marks): clear, detailed analysis of several methods, with well-chosen short quotations from the extract and developed comments on the effect on the reader, using accurate terms.
+Reward quotations that really are in the extract; do not reward invented quotations.`
+      : null;
   return [
     { role: "system", content: SYSTEM },
     { role: "user", content:
 `Mark a student's extended answer to a ${marks}-mark question, the way a GCSE examiner uses a levels-based mark scheme.
 
 QUESTION (${marks} marks): ${q}
-${context(ctx)}
+${context(ctx, english)}
 INDICATIVE CONTENT (things a good answer could include — the student does not need all of them, and may make other valid points):
 ${points.map((p, i) => `${i + 1}. ${p}`).join("\n")}
 
 LEVELS:
-- Level 0 (0 marks): nothing relevant.
+${levels || `- Level 0 (0 marks): nothing relevant.
 - Level 1 (${bands[0][0]}–${bands[0][1]} marks): a few simple points, mostly knowledge, little or no development; not linked to the question${ctx ? " or the business" : ""}; any explanation is weak or generic.
 - Level 2 (${bands[1][0]}–${bands[1][1]} marks): some relevant knowledge and understanding applied to the question${ctx ? " and the business in the scenario" : ""}; some chains of reasoning (because… so… which leads to…), but not sustained or not fully developed${nine ? "; a judgement may be stated but is weakly supported" : ""}.
-- Level 3 (${bands[2][0]}–${bands[2][1]} marks): accurate knowledge applied throughout${ctx ? " to the business in the scenario" : ""}; well-developed, logical chains of reasoning that answer the question${nine ? "; AND a clear judgement that is justified from the evaluation (weighing up the options or sides), not just asserted" : ""}.
+- Level 3 (${bands[2][0]}–${bands[2][1]} marks): accurate knowledge applied throughout${ctx ? " to the business in the scenario" : ""}; well-developed, logical chains of reasoning that answer the question${nine ? "; AND a clear judgement that is justified from the evaluation (weighing up the options or sides), not just asserted" : ""}.`}
 
 HOW TO MARK: decide the best-fit level first, then the mark inside it: start in the middle of the level, move up if the answer is stronger than typical for that level and down if weaker. Mark positively. Do not require exact wording and do not penalise spelling. Reward what the student says, not length.
 ${nine ? "Without a justified judgement, an answer cannot reach Level 3. " : ""}A list of several points with no explanation stays in Level 1.

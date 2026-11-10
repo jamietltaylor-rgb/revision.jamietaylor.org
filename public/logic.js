@@ -415,10 +415,19 @@ const KIND_PROFILES = [
     words: { outline: "a short calculation (“Work out…”, “Calculate…”, “Simplify…”, “Solve…”). The mark scheme points are the method mark(s) and the final answer mark, e.g. “M1 for 3 × 4.5 ; A1 for 13.5”. No essay-style questions.",
              three: "a multi-step question (“Show that…”, “Work out the area/probability/value…”). Three points: two method marks then the accuracy (answer) mark." },
     note: "Maths: calculation questions, marked on method and answer." },
-  { re: /\b(english|literature|lit|drama|poetry|shakespeare)\b/i, offer: WRITTEN_K, on: WRITTEN_K,
+  { re: /\b(literature|lit|drama|poetry|poems?|shakespeare|macbeth|romeo|inspector calls|christmas carol|jekyll|frankenstein)\b/i, offer: WRITTEN_K, on: WRITTEN_K,
     labels: { outline: "Identify / Quote", three: "Explain one effect", six: "Analyse the writer's methods", nine: "Evaluate / How far" },
     words: { outline: "“Identify one word or phrase that shows… and say what it suggests” (point + linked comment)", three: "“Explain one effect of the writer's use of…” (identify the method, quote or refer to it, explain the effect)", six: "“Analyse how the writer uses language/structure to…” (points on methods, with short quotations and their effects)", nine: "“How far do you agree that…?” or “Evaluate the writer's presentation of…” with a supported judgement" },
-    note: "English: analysis of methods and effects. Multiple choice isn't used." },
+    note: "English Literature: analysis of methods and effects. Multiple choice isn't used." },
+  { re: /\b(english|language|reading|writing|comprehension|unseen)\b/i, offer: WRITTEN_K, on: WRITTEN_K, ctxFor: ["outline", "three", "six"],
+    labels: { outline: "Find and explain", three: "Explain the effect", six: "Language analysis", nine: "Writing task" },
+    words: {
+      outline: "a short reading question on the extract: “From lines 1–5, identify two things the writer tells us about…” or “Find one word or phrase that suggests… and explain what it suggests”. Mark scheme: the two points, each with a short quotation or reference from the extract",
+      three: "“Explain one way the writer makes the extract… (e.g. tense, a simile, a short sentence) and its effect on the reader”: identify the method, quote it, explain the effect",
+      six: "an AQA/Edexcel-style language question: “How does the writer use language to describe/persuade/interest the reader?”. Mark scheme: language methods in the extract with the quotation and its effect (use real quotations from YOUR extract)",
+      nine: "a WRITING task like the exam's: “Write a letter / article / speech / the opening of a story about… (about 150–200 words)”, giving the audience, purpose and form. Do NOT include an extract for this one. Mark scheme (indicative content): what a good answer would contain — audience and tone, structure and paragraphing, a range of devices (rhetorical questions, lists of three, vocabulary), and accurate spelling, punctuation and grammar" },
+    ctxRule: "This is English LANGUAGE (reading and writing skills), NOT trivia about English. Every reading question needs an extract: write a fresh, original passage of 80–130 words (fiction, or non-fiction such as an article, review or letter) yourself in \"ctx\" — never copy a published text — and the question must say \"Read the extract\" or refer to it. Quotations in the mark scheme must come word for word from your extract. The topic only tells you the theme or text type (e.g. “persuasive writing”, “a storm at sea”); never ask facts about the English language itself.",
+    note: "English Language: questions come with a short extract to read, like the real paper, plus a writing task (9)." },
   { re: /\b(history|religious|r\.?e\.?|philosophy|ethics|politics|citizenship|classics|theology)\b/i, offer: WRITTEN_K, on: WRITTEN_K,
     labels: { outline: "Describe one", three: "Explain one", six: "Explain why", nine: "How far do you agree" },
     words: { outline: "“Describe one feature of…” / “Outline one…” (a fact plus a linked detail)", three: "“Explain one reason why / one way in which…” (identify, then develop with accurate detail)", six: "“Explain why…” or “Explain the importance of…” with specific, accurate knowledge and linked reasons", nine: "“How far do you agree that…?” / “Evaluate the view that…” weighing both sides to a supported judgement" },
@@ -451,7 +460,7 @@ export function examProfile(...names) {
   for (const n of names) {
     const text = String(n ?? "");
     if (!text.trim()) continue;
-    for (const p of KIND_PROFILES) if (p.re.test(text)) return { offer: p.offer, on: p.on, labels: p.labels, words: p.words, note: p.note };
+    for (const p of KIND_PROFILES) if (p.re.test(text)) return { offer: p.offer, on: p.on, labels: p.labels, words: p.words, note: p.note, ctxRule: p.ctxRule || "", ctxFor: p.ctxFor || [] };
   }
   return { ...DEFAULT_PROFILE };
 }
@@ -469,7 +478,7 @@ export const isBusinessSubject = (...names) => names.some((n) => /\bbusiness\b/i
  * What to tell a question-writing AI about each kind: the JSON shape and the rules real papers follow.
  * Used by both the built-in question maker (server) and the "copy a prompt for another AI" text.
  */
-export function examKindGuide(kind, { business = false, words = {} } = {}) {
+export function examKindGuide(kind, { business = false, words = {}, ctxRule = "", ctxFor = [] } = {}) {
   const ctxNote = business
     ? ` Set it in ONE made-up business that you introduce in "ctx" (2–4 sentences: its name, what it sells or does, and one or two facts — e.g. size, location, a recent change, a figure) and name that business in the question.`
     : ` If the question needs a scenario, add it as a short "ctx" (1–3 sentences); otherwise leave "ctx" out.`;
@@ -503,7 +512,11 @@ export function examKindGuide(kind, { business = false, words = {} } = {}) {
   const g = guides[kindId(kind)];
   if (!g) return null;
   const w = words && words[kindId(kind)];
-  return w ? { shape: g.shape, rules: `${g.rules} In THIS subject write it as: ${w}` } : g;
+  let shape = g.shape, rules = g.rules;
+  if (w) rules += ` In THIS subject write it as: ${w}`;
+  if (ctxRule && ctxFor.includes(kindId(kind))) { if (!shape.includes('"ctx"')) shape = shape.replace(/\}$/, ',"ctx":"the extract"}'); rules += ` ${ctxRule}`; }
+  else if (ctxRule) shape = shape.replace(/,"ctx":"the business"/, "");
+  return { shape, rules };
 }
 
 const asNum = (v) => { const n = typeof v === "string" ? Number(v.replace(/,/g, "").trim()) : v; return typeof n === "number" && Number.isFinite(n) && Math.abs(n) < 1e9 ? Math.round(n * 1e6) / 1e6 : null; };
@@ -794,7 +807,7 @@ function toItem(parts, alts = [], src = "", marks = 0, extra = {}) {
       item.kind = kind;
       item.marks = kind === "outline" ? (m === 4 ? 4 : 2) : EXAM_KINDS[kind].marks;
     }
-    const ctx = clean(extra.ctx).slice(0, 700);
+    const ctx = clean(extra.ctx).slice(0, 1200);
     if (ctx && !item.opts) item.ctx = ctx; // the short business/scenario extract a case-study question is set around
     if (extra.fig !== undefined && extra.fig !== null) { // a graph, chart or table the question refers to
       const f = cleanFigure(extra.fig);
@@ -927,7 +940,7 @@ export function buildAiPrompt({ topic, level = "GCSE", count = 15, style = "mixe
     const used = PAPER_ORDER.filter((k) => plan.includes(k));
     const counts = used.map((k) => `${plan.filter((x) => x === k).length} × ${EXAM_KINDS[k].marks}-mark ${EXAM_KINDS[k].label.toLowerCase()}`).join(", ");
     const prof = examProfile(subject, topic);
-    const guides = used.map((k) => examKindGuide(k, { business, words: prof.words }));
+    const guides = used.map((k) => examKindGuide(k, { business, words: prof.words, ctxRule: prof.ctxRule, ctxFor: prof.ctxFor }));
     return `Write ${plan.length} exam-style questions about "${t}"${clean(subject) ? ` (subject: ${clean(subject)})` : ""} at ${lvl} level, laid out like a real exam paper: ${counts}.${tailor}
 
 Reply with ONLY a JSON array, in the order a paper would run (shortest first). Use these shapes:
@@ -1151,7 +1164,7 @@ export function sanitiseState(raw, catalogueIds = null) {
     } else if (isExam) {
       const k = kindId(q.kind);
       if (k && k !== "mc1" && k !== "mc2") kind = k;
-      ctx = str(q.ctx, 700);
+      ctx = str(q.ctx, 1200);
     }
     if (isExam && q.fig !== undefined && q.fig !== null) { fig = cleanFigure(q.fig); if (!fig) continue; }
     const subjectId = str(q.subjectId, 40);

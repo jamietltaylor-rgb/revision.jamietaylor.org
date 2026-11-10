@@ -721,3 +721,12 @@ test("each subject gets its own kinds of question, names and command words", () 
   assert.doesNotMatch(L.buildAiPrompt({ topic: "Quadratics", mode: "exam", subject: "Maths", count: 4 }), /"kind":"six"/);
   assert.match(L.buildAiPrompt({ topic: "WW1", mode: "exam", subject: "History", count: 4 }), /How far do you agree/);
 });
+
+test("English Language questions come with an extract and a writing task, not trivia about English", () => {
+  for (const name of ["English Language", "English", "GCSE English"]) { const p = L.examProfile(name); assert.deepEqual(p.ctxFor, ["outline", "three", "six"], name); assert.equal(L.kindLabel("nine", p), "Writing task"); }
+  assert.equal(L.kindLabel("six", L.examProfile("English Literature")), "Analyse the writer's methods", "Literature stays separate");
+  const prompt = L.buildAiPrompt({ topic: "persuasive writing", mode: "exam", subject: "English Language", count: 4 });
+  assert.match(prompt, /original passage of 80–130 words/); assert.match(prompt, /"ctx":"the extract"/); assert.match(prompt, /WRITING task/); assert.match(prompt, /never ask facts about the English language/);
+  const items = L.parseQuestionList(JSON.stringify([{ kind: "six", q: "Read the extract. How does the writer use language to describe the storm?", marks: 6, a: "“howled” personification ; “black walls of water” metaphor", ctx: "The wind howled across the deck. ".repeat(30) }])).items;
+  assert.ok(items[0].ctx.length > 700, "a full-length extract is kept");
+});
