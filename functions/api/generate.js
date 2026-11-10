@@ -5,7 +5,7 @@
 import { parseQuestionList, BOARDS, boardLine, examFormats, refersToMissingFigure, EXAM_KINDS, kindId, examKindOf, examPlan, examKindGuide, defaultExamKinds, examProfile, isBusinessSubject } from "../../public/logic.js";
 
 const MODELS = ["@cf/meta/llama-3.3-70b-instruct-fp8-fast", "@cf/meta/llama-3.1-8b-instruct"];
-const STYLES = ["typed", "choice", "mixed"];
+const STYLES = ["typed", "choice", "gapfill", "mixed"];
 const json = (status, body) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json", "cache-control": "no-store" } });
 
 async function signedIn(request, env) {
@@ -32,7 +32,7 @@ function readRequest(body) {
   const level = String(body.level || "GCSE").replace(/\s+/g, " ").trim().slice(0, 40) || "GCSE";
   const mode = body.mode === "exam" ? "exam" : "quick";
   let count = Math.max(1, Math.min(mode === "exam" ? 6 : 15, Math.round(Number(body.count)) || (mode === "exam" ? 5 : 10)));
-  const style = STYLES.includes(body.style) ? body.style : "mixed";
+  const style = STYLES.includes(body.style) ? body.style : "typed";
   const avoid = (Array.isArray(body.avoid) ? body.avoid : []).map((x) => String(x || "").replace(/\s+/g, " ").trim().slice(0, 140)).filter(Boolean).slice(0, 30);
   const paper = body.paper === true;
   const subject = String(body.subject || "").replace(/\s+/g, " ").trim().slice(0, 60);
@@ -97,6 +97,7 @@ function buildMessages({ topic, level, count, style, avoid = [], paper = false, 
   const styleRule = {
     typed: 'Every question is answered by typing, so use an empty "wrong" list.',
     choice: 'Give exactly 3 plausible but clearly wrong options in "wrong" for every question.',
+    gapfill: 'Every question is a GAP FILL: "q" is one sentence about the topic with a single blank written as _____ where a key word or short phrase is missing (e.g. "Plants make glucose by a process called _____."), and "a" is just the missing word(s). The sentence must have one clear answer. Use an empty "wrong" list.',
     mixed: 'Give exactly 3 plausible but clearly wrong options in "wrong" for about half the questions, and an empty list for the rest.',
   }[style];
   return [
@@ -198,7 +199,8 @@ export async function onRequestPost({ request, env }) {
     if (quota) break;
     try {
       const out = await env.AI.run(model, { messages: buildMessages(req), max_tokens: req.mode === "exam" ? 6000 : 2500, temperature: 0.3 });
-      const items = extract(out && out.response !== undefined ? out.response : out, req.mode, req.subject, req.topic, req.kinds);
+      let items = extract(out && out.response !== undefined ? out.response : out, req.mode, req.subject, req.topic, req.kinds);
+      if (req.mode === "quick" && req.style === "gapfill") items = items.filter((it) => /_{2,}|\.{4,}|…{2,}/.test(it.q)); // a gap fill needs its gap
       const seen = new Set();
       const label = req.board === "Any exam board" ? "Past-paper style" : `${req.board} past-paper style`;
       const unique = items.filter((it) => { const k = it.q.toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true; });

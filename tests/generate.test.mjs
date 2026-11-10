@@ -208,3 +208,11 @@ test("a reply that is cut off or has junk in it still gives the complete questio
   const r2 = await call(post(examBody({ kinds: ["three"], count: 1 })), env({ run: async () => ({ response: ++n === 1 ? "Sorry, I can't." : JSON.stringify([written]) }) }));
   assert.equal(r2.status, 200); assert.equal(n, 2);
 });
+
+test("gap fill asks for sentences with a blank and drops questions that have none", async () => {
+  stubAuth(); let prompt = "";
+  const reply = JSON.stringify([{ q: "Plants make glucose by _____.", a: "photosynthesis" }, { q: "What do plants make?", a: "glucose" }]);
+  const r = await call(post({ topic: "Plants", count: 5, style: "gapfill" }), env({ run: async (m, i) => { prompt = i.messages[1].content; return { response: reply }; } }));
+  assert.match(prompt, /GAP FILL/); assert.match(prompt, /_____/);
+  assert.deepEqual(r.body.questions.map((q) => q.q), ["Plants make glucose by _____."]);
+});

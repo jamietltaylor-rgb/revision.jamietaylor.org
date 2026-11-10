@@ -26,7 +26,7 @@ let lastChest = null;
 const auth = { mode: "in", username: "", password: "", confirm: "", error: "", busy: false };
 const draft = {
   subjectId: "", newSubject: "", q: "", a: "", wrong: "",
-  topic: "", level: "GCSE", count: "10", style: "mixed", busy: false, progress: "", aiError: "", prompt: "", paper: false, board: "Any exam board", boardInit: false, mode: "quick", kinds: null, allKinds: false,
+  topic: "", level: "GCSE", count: "10", style: "gapfill", busy: false, progress: "", aiError: "", prompt: "", paper: false, board: "Any exam board", boardInit: false, mode: "quick", kinds: null, allKinds: false,
   pet: "buddy", paste: "", preview: null, filter: "all", search: "", treatName: "", treatCost: "",
 };
 
@@ -1376,7 +1376,7 @@ function viewQuestions() {
       h("label", {}, `How many (1–${maxCount()})`, h("input", { type: "number", inputmode: "numeric", min: "1", max: String(maxCount()), step: "1", value: draft.count, "aria-label": "How many questions",
         oninput: (e) => { draft.count = e.target.value; }, onblur: (e) => { draft.count = String(wantedCount()); e.target.value = draft.count; } }),
         h("span", { class: "row", style: "gap:.35rem;margin-top:.35rem" }, (draft.mode === "exam" ? [3, 5, 10, 15, 20] : [5, 10, 15, 25, 40]).map((n) => h("button", { type: "button", class: "small" + (String(n) === String(draft.count) ? " primary" : ""), onclick: () => { draft.count = String(n); render(); } }, String(n))))),
-      draft.mode === "quick" && h("label", {}, "Style", h("select", { onchange: (e) => { draft.style = e.target.value; } }, [["mixed", "Mix of both"], ["typed", "Type the answer"], ["choice", "Multiple choice"]].map(([v, l]) => opt(v, l, draft.style)))),
+      draft.mode === "quick" && h("label", {}, "Style", h("select", { onchange: (e) => { draft.style = e.target.value; } }, [["gapfill", "Gap fill"], ["typed", "Type the answer"], ["choice", "Multiple choice"]].map(([v, l]) => opt(v, l, draft.style)))),
       h("label", {}, "Exam board", h("select", { "aria-label": "Exam board", onchange: (e) => { draft.board = e.target.value; state.settings.board = e.target.value === "Any exam board" ? "" : e.target.value; save(); render(); } }, L.BOARDS.map((x) => opt(x, x, draft.board))))),
     h("label", {}, "Type of questions", h("select", { "aria-label": "Type of questions", onchange: (e) => { draft.mode = e.target.value; if (draft.mode === "exam" && Number(draft.count) > 20) draft.count = "5"; render(); } },
       [["quick", "Quick questions (short answers)"], ["exam", "Complete exam questions (marks + mark scheme)"]].map(([v, l]) => opt(v, l, draft.mode)))),

@@ -730,3 +730,8 @@ test("English Language questions come with an extract and a writing task, not tr
   const items = L.parseQuestionList(JSON.stringify([{ kind: "six", q: "Read the extract. How does the writer use language to describe the storm?", marks: 6, a: "“howled” personification ; “black walls of water” metaphor", ctx: "The wind howled across the deck. ".repeat(30) }])).items;
   assert.ok(items[0].ctx.length > 700, "a full-length extract is kept");
 });
+
+test("the copy-a-prompt text can ask for gap fill", () => {
+  const p = L.buildAiPrompt({ topic: "Cells", style: "gapfill" });
+  assert.match(p, /GAP FILL/); assert.match(p, /_____/);
+});

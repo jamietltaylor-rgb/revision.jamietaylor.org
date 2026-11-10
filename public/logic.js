@@ -266,7 +266,7 @@ export function heatmap(stats, today, weeks, goal) {
 
 // ---------- reading a pasted list of questions ----------
 const MAX_PASTE = 500;
-const clean = (v) => String(v ?? "").replace(/\*\*|__/g, "").replace(/\s+/g, " ").trim();
+const clean = (v) => String(v ?? "").replace(/\*\*|(?<!_)__(?!_)/g, "").replace(/\s+/g, " ").trim();
 const stripNumber = (line) => line.replace(/^\s*(?:\(?\d{1,3}[.):]|[-*•])\s+/, "");
 
 function splitCsv(line) {
@@ -923,12 +923,12 @@ export function markDuplicates(items, questions, subjectId) {
 }
 
 export const LEVELS = ["Primary school", "Years 7–9 (KS3)", "GCSE", "A-level", "University", "Just for fun"];
-export const STYLES = { typed: "typed answers", choice: "multiple choice", mixed: "a mix of typed and multiple choice" };
+export const STYLES = { typed: "typed answers", choice: "multiple choice", gapfill: "gap fill", mixed: "a mix of typed and multiple choice" };
 
 /** The text people copy into another AI (ChatGPT, Gemini…) to get questions this app can read. */
 export const BOARDS = ["Any exam board", "AQA", "Edexcel", "OCR", "WJEC / Eduqas", "CCEA", "SQA"];
 
-export function buildAiPrompt({ topic, level = "GCSE", count = 15, style = "mixed", paper = false, board = "", mode = "quick", kinds, subject = "" } = {}) {
+export function buildAiPrompt({ topic, level = "GCSE", count = 15, style = "gapfill", paper = false, board = "", mode = "quick", kinds, subject = "" } = {}) {
   const t = clean(topic).slice(0, 120) || "[type your topic here]";
   const n = Math.max(1, Math.min(50, Math.round(Number(count)) || 15));
   const lvl = clean(level) || "GCSE";
@@ -955,6 +955,7 @@ ${used.map((k, i) => `- ${k}: ${guides[i].rules}`).join("\n")}
     typed: "Do not include wrong options — every question is answered by typing.",
     choice: "Give 3 wrong options for every question (so each one is multiple choice).",
     mixed: "Give 3 wrong options for about half the questions and none for the rest.",
+    gapfill: "Every question is a GAP FILL: one sentence about the topic with a single blank written as _____ where a key word or short phrase is missing, and the answer is the missing word(s). Do not include wrong options.",
   }[style] || "";
   return `Write ${n} revision questions about "${t}" at ${lvl} level.${tailor}
 
