@@ -197,3 +197,14 @@ test("quick mode is unchanged by exam formats", async () => {
   const r = await call(post({ topic: "Photosynthesis", subject: "Biology", count: 3 }), env({ run: async (m, i) => { prompt = i.messages[1].content; return { response: JSON.stringify([{ q: "Gas taken in?", a: "Carbon dioxide", wrong: [] }]) }; } }));
   assert.equal(r.body.questions.length, 1); assert.doesNotMatch(prompt, /"fig"/);
 });
+
+test("a reply that is cut off or has junk in it still gives the complete questions", async () => {
+  stubAuth();
+  const cut = '[{"kind":"three","q":"Explain one reason A.","marks":3,"a":"a ; b ; c"},{"kind":"three","q":"Explain one reason B \\"quoted } brace\\".","marks":3,"a":"a ; b ; c"},{"kind":"three","q":"Explain one rea';
+  const r = await call(post(examBody({ kinds: ["three"], count: 3 })), env({ run: async () => ({ response: cut }) }));
+  assert.equal(r.status, 200); assert.equal(r.body.questions.length, 2);
+  // the first attempt is unusable, the second works
+  let n = 0;
+  const r2 = await call(post(examBody({ kinds: ["three"], count: 1 })), env({ run: async () => ({ response: ++n === 1 ? "Sorry, I can't." : JSON.stringify([written]) }) }));
+  assert.equal(r2.status, 200); assert.equal(n, 2);
+});

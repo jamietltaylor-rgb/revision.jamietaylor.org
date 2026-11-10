@@ -145,12 +145,35 @@ export function fitToPlan(items, plan, count) {
   return out.map((it, i) => [it, i]).sort((a, b) => rank(a[0]) - rank(b[0]) || a[1] - b[1]).map((x) => x[0]);
 }
 
+/** Pulls every complete {...} object out of a JSON array that was cut off or has junk in it (a reply that ran out of room, say). */
+export function salvageObjects(raw) {
+  const start = raw.indexOf("[");
+  if (start === -1) return "";
+  const out = [];
+  let depth = 0, from = -1, inStr = false, esc = false;
+  for (let i = start + 1; i < raw.length; i++) {
+    const c = raw[i];
+    if (inStr) { if (esc) esc = false; else if (c === "\\") esc = true; else if (c === '"') inStr = false; continue; }
+    if (c === '"') inStr = true;
+    else if (c === "{") { if (depth++ === 0) from = i; }
+    else if (c === "}" && depth > 0 && --depth === 0) out.push(raw.slice(from, i + 1));
+  }
+  return out.length ? "[" + out.join(",") + "]" : "";
+}
+
 function extract(text, mode = "quick", subject = "", topic = "", kinds = null) {
   const raw = typeof text === "string" ? text : JSON.stringify(text ?? "");
   const a = raw.indexOf("["), b = raw.lastIndexOf("]");
-  if (a !== -1 && b > a) {
-    const parsed = parseQuestionList(raw.slice(a, b + 1));
-    if (parsed.format === "json" && parsed.items.length) return mode === "exam" ? allowedExamItems(parsed.items, subject, topic, kinds) : parsed.items;
+  const tries = [];
+  if (a !== -1 && b > a) tries.push(raw.slice(a, b + 1));
+  const rescued = salvageObjects(raw);
+  if (rescued) tries.push(rescued);
+  for (const t of tries) {
+    const parsed = parseQuestionList(t);
+    if (parsed.format === "json" && parsed.items.length) {
+      const items = mode === "exam" ? allowedExamItems(parsed.items, subject, topic, kinds) : parsed.items;
+      if (items.length) return items;
+    }
   }
   if (mode === "exam") return [];
   // The model ignored the JSON instruction: accept it only if it wrote the 'question | answer' list format.
@@ -168,9 +191,12 @@ export async function onRequestPost({ request, env }) {
   if (req.error) return json(400, { error: req.error });
 
   let lastError = "";
-  for (const model of MODELS) {
+  const attempts = req.mode === "exam" ? [MODELS[0], MODELS[0], MODELS[1]] : MODELS; // the big model gets a second go: it sometimes writes something unusable
+  let quota = false;
+  for (const model of attempts) {
+    if (quota) break;
     try {
-      const out = await env.AI.run(model, { messages: buildMessages(req), max_tokens: req.mode === "exam" ? 4000 : 2500, temperature: 0.3 });
+      const out = await env.AI.run(model, { messages: buildMessages(req), max_tokens: req.mode === "exam" ? 6000 : 2500, temperature: 0.3 });
       const items = extract(out && out.response !== undefined ? out.response : out, req.mode, req.subject, req.topic, req.kinds);
       const seen = new Set();
       const label = req.board === "Any exam board" ? "Past-paper style" : `${req.board} past-paper style`;
@@ -180,7 +206,8 @@ export async function onRequestPost({ request, env }) {
       if (questions.length) return json(200, { questions, model });
       lastError = "The question maker didn't return anything usable.";
     } catch (e) {
-      lastError = /limit|quota|capacity|neurons/i.test(String(e && e.message)) ? "The free daily allowance for making questions is used up — try again tomorrow, or paste in a list." : "The question maker had a problem.";
+      quota = /limit|quota|neurons/i.test(String(e && e.message));
+      lastError = quota ? "The free daily allowance for making questions is used up — try again tomorrow, or paste in a list." : "The question maker had a problem (it was busy or timed out).";
     }
   }
   return json(502, { error: `${lastError} Try again, or use "Copy a prompt for another AI".` });

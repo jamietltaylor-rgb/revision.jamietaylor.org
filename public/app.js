@@ -1211,7 +1211,7 @@ async function makeWithAi() {
   let failure = "";
   try {
     // The AI writes up to 15 quick questions (or 5 full exam questions) at a time, so bigger amounts are asked for in rounds.
-    const chunk = draft.mode === "exam" ? 5 : 15;
+    const chunk = draft.mode === "exam" ? 4 : 15;
     const kinds = draft.mode === "exam" ? examKinds() : [];
     if (draft.mode === "exam" && !kinds.length) throw new Error("Tick at least one type of exam question.");
     const remaining = draft.mode === "exam" ? L.examPlan(total, kinds) : null; // which kind each question should be, in paper order
