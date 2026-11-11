@@ -230,6 +230,71 @@ export const GUIDES = [
   },
 ];
 
+// ---- more boards. Each line adds one exam board's layout and mark bands to a subject above.
+const addBoard = (id, board, data) => { const g = GUIDES.find((x) => x.id === id); if (g) g.boards[board] = data; };
+
+// Edexcel (Pearson)
+addBoard("english-language", "Edexcel", {
+  paper: "Edexcel GCSE English Language 1EN0, Paper 1 'Fiction and imaginative writing', 64 marks: Section A reading (24 marks) Q1 retrieve one point (1), Q2 retrieve and infer from lines 1-8 (2), Q3 how language and structure describe the characters' experiences (6), Q4 evaluate how successfully the extract creates a feeling such as mystery (15); Section B imaginative writing (40: 24 content and organisation AO5 + 16 vocabulary, spelling, punctuation and grammar AO6), a choice of two titles.",
+  marking: "Edexcel bands: Q3 (6): L1 1-2 comment on language or structure (capped at the top of L1 if only one is covered), L2 3-4 explains both with appropriate references, L3 5-6 analyses both with discriminating references. Q4 (15) five levels: 1-3 description, 4-6 comment, 7-9 explanation and informed judgement, 10-12 analysis and developed critical judgement, 13-15 evaluation with a sustained, detached overview. Writing AO5 (24): L1 1-4, L2 5-9, L3 10-14, L4 15-19, L5 20-24; AO6 (16): L1 1-3, L2 4-6, L3 7-9, L4 10-12, L5 13-16. Q1 accepts only the one point asked for; Q2 accepts any reasonable point from the lines, quoted or in own words.",
+  sources: ["Edexcel 1EN0/01 mark scheme (June 2023)"],
+});
+addBoard("english-literature", "Edexcel", {
+  paper: "Edexcel GCSE English Literature 1ET0 Paper 1 'Shakespeare and post-1914 literature': Section A Shakespeare, part (a) a character in an extract (20 marks, AO2 only) and part (b) a theme elsewhere in the play (20 marks: AO1 15 + AO3 5); Section B post-1914 drama or novel (40 marks: AO1 16, AO3 16, AO4 spelling, punctuation and grammar 8).",
+  marking: "Five levels by best fit: Section A bands 1-4, 5-8, 9-12, 13-16, 17-20; Section B AO1+AO3 (32) bands 1-6, 7-12, 13-19, 20-26, 27-32 and AO4 (8) bands 1-2, 3-5, 6-8. Credit relevant short quotations or references to elsewhere in the text, correct terminology used in analysis, links to context, and personal interpretation; indicative content is not prescriptive.",
+  sources: ["Edexcel 1ET0/01 mark scheme (June 2023)"],
+});
+addBoard("biology", "Edexcel", {
+  paper: "Edexcel GCSE Biology 1BI0, Paper 1 Higher (June 2023): 10 questions of 7-12 marks, 100 marks, mixing one-mark multiple choice, calculations, short 'explain' and 'describe' answers and two 6-mark extended responses.",
+  marking: "Edexcel conventions: 'accept' lists alternatives, 'ignore' is neither credited nor penalised, 'reject' answers score nothing (for example meiosis for asexual reproduction), '/' separates alternative wordings, AND means both parts are needed, ecf carries an earlier wrong value forward. Calculations: marks for method, the final value and units; any correctly rounded number of decimal places is accepted. 6-mark answers: L1 (1-2) some understanding, possibly inaccurate, limited detail; L2 (3-4) mostly relevant with some inaccuracies and a mostly clear structure; L3 (5-6) accurate, relevant and detailed throughout with a clear logical structure. A pathogen example earns nothing unless it is linked to causing disease.",
+  sources: ["Edexcel 1BI0/1H mark scheme (June 2023)"],
+});
+addBoard("chemistry", "Edexcel", {
+  paper: "Edexcel GCSE Chemistry 1CH0, Paper 1 Higher (June 2023): 10 questions with two 6-mark extended answers, plus calculations (such as titration readings), practical and data questions.",
+  marking: "Edexcel conventions: 'allow', 'reject', 'ignore', ecf; formulae and equations are strict about subscripts, capital letters and balancing, and some state symbols are ignored. Calculations: a mark per step, and a correct final answer usually earns full marks; rounding and significant figures are specified and some units are required. 6-mark answers: L1 (1-2) basic, may be inaccurate; L2 (3-4) mostly relevant but less developed; L3 (5-6) accurate, detailed and well structured. The whole answer is read, and contradictory material is ignored before choosing a level.",
+  sources: ["Edexcel 1CH0/1H mark scheme (June 2023)"],
+});
+addBoard("physics", "Edexcel", {
+  paper: "Edexcel GCSE Physics 1PH0, Paper 1 Higher (June 2023): 10 questions of 6-12 marks, mixing short answers, multiple choice, calculations, graph plotting, describe and explain, practical method descriptions and level-marked extended answers.",
+  marking: "Edexcel conventions: 'allow', 'do not allow', 'ignore', ecf; a power-of-ten slip usually loses the mark; g = 9.8 or 9.81 N/kg is accepted. Calculations are typically three marks: the equation, substitution (with units), the answer (with units), and a rearrangement may be a separate mark; a correct answer alone earns full marks, and a wrong answer with the equation and substitution still earns the method marks. 6-mark answers: L1 (1-2) isolated statements; L2 (3-4) a limited or partial procedure or explanation; L3 (5-6) a detailed, well-structured response with two or more linked details.",
+  sources: ["Edexcel 1PH0/1H mark scheme (June 2023)"],
+});
+addBoard("history", "Edexcel", {
+  paper: "Edexcel GCSE History 1HI0 (each paper offers an option): typical questions are 'Describe two features of...' (4 marks, 1 per feature plus 1 for detail), 'How useful are Sources A and B...' (8, AO3), 'Follow up Source A' (4), 'Explain one difference/similarity' (4), 'Explain why...' (12, AO1 6 + AO2 6) and 'How far do you agree...' (16, AO1 6 + AO2 10, plus up to 4 SPaG marks on one question).",
+  marking: "Four levels for extended answers: simple or generalised; limited analysis; some analysis with a generally sustained line of reasoning; analytical with a coherent, logically structured argument. Answers that stay within the prompted stimulus points are capped. AO1 and AO2 are interdependent, so an answer with no explanation cannot go beyond the top of Level 1. Source utility: credit a judgement against a valid criterion using both content and provenance (nature, origin, purpose); provenance and context only count when used to evaluate the content. 16-mark answers need an overall judgement: L1 missing or asserted, L2 weakly justified, L3 some justification, L4 explicit criteria applied. SPaG: threshold 1, intermediate 2-3, high 4.",
+  sources: ["Edexcel 1HI0/12 mark scheme (June 2023)"],
+});
+addBoard("geography", "Edexcel", {
+  paper: "Edexcel GCSE Geography A 1GA0 Paper 1 'The physical environment': several questions each split into lettered parts of 1, 2, 3 and 4 marks and 8-mark extended questions (4 marks AO2/AO3 argument + 4 marks for using the resources such as maps, grid references, photographs and figures), with a separate SPaG strand of up to 4 marks on one question.",
+  marking: "8-mark answers (three levels): L1 (1-3) isolated understanding, flawed connections, limited evidence; L2 (4-6) some logical connections, mostly relevant but not fully coherent; L3 (7-8) logical connections throughout, a balanced, well-developed argument supported by accurate resource evidence for every aspect. Point items: one mark for the point plus one for the development; calculations need working; 'accept any other appropriate response'; locational detail alone does not earn an explanation mark.",
+  sources: ["Edexcel 1GA0/01 mark scheme (June 2023)"],
+});
+addBoard("computer-science", "Edexcel", {
+  paper: "Edexcel GCSE Computer Science 1CP2 Paper 1 'Principles of computer science' (about 75 marks over 5 questions with lettered parts): multiple choice, short answers, linked explanations, completing tables and flowcharts, truth tables, binary and hex conversion, networks, algorithms (such as linear search) and one 6-mark level-based question. Paper 2 is the Python programming paper.",
+  marking: "6-mark answers: L1 (1-2) basic independent points with limited linkage or application; L2 (3-4) adequate understanding with some linkage and application; L3 (5-6) comprehensive understanding with well-developed, coherent reasoning applied to the context. For 'linked' explanations the expansion must clearly connect to the statement. A flowchart needs an input symbol, a decision symbol with exactly two labelled outputs, a correct test and no hanging symbols. 'Allow' variants such as X % 2 == 0 for X MOD 2 == 0; a truth table's row order does not matter but it must be fully correct for both marks.",
+  sources: ["Edexcel 1CP2/01 mark scheme (June 2023)"],
+});
+addBoard("religious-studies", "Edexcel", {
+  paper: "Edexcel GCSE Religious Studies A 1RA0 (for example Paper 1 Christianity): (a) 3 marks, a list of up to three points (a list earns at most 1 if unexplained); (b) 4 marks, a reason or example with development; (c) 5 marks, a detail with development (up to 4) plus 1 mark for a relevant source of wisdom or authority such as scripture; (d) 12 marks 'evaluate' with arguments for and against and a judgement (3 SPaG marks on some of the 12-mark questions).",
+  marking: "12 marks: L1 (1-3) superficial, generic arguments and an unjustified conclusion; L2 (4-6) some connections and a conclusion not fully justified; L3 (7-9) coherent reasoning that considers different viewpoints, with a partially justified conclusion; L4 (10-12) critical, thorough reasoning across the full range of elements with a fully justified conclusion. An answer that does not consider different viewpoints within the tradition and non-religious viewpoints cannot go beyond Level 2. Repeated points, developments that do not relate to the point and the question, and sources of authority unrelated to the point earn nothing. SPaG (3): 1 reasonable accuracy, 2 considerable, 3 consistent with a wide range of specialist terms.",
+  sources: ["Edexcel 1RA0/1B mark scheme (June 2023)"],
+});
+addBoard("psychology", "Edexcel", {
+  paper: "Edexcel GCSE Psychology 1PS0 Paper 1: six sections (A-F, topics such as memory, development, social influence), questions 1-23, mostly 1-2 marks, 4-mark evaluation items (a strength or weakness with a justification), and two 9-mark extended questions in Section F (3 marks each for AO1, AO2 and AO3); total 80 marks.",
+  marking: "9 marks: L1 (1-3) isolated understanding, simplistic links, one-sided and limited evidence; L2 (4-6) mostly accurate, some logical links, imbalanced; L3 (7-9) accurate and thorough, sustained links, balanced and well supported. An answer showing only knowledge cannot go beyond the top of Level 1, and an answer that does not consider the required areas or issues cannot go beyond Level 2. Application items: 1 mark for accurate understanding and 1 for applying it to the scenario. Evaluation items: 1 mark for a strength or weakness and 1 for a linked justification. Credit relevant studies (for example Asch, Piliavin, Sperry, Peterson and Peterson).",
+  sources: ["Edexcel 1PS0/01 mark scheme (June 2023)"],
+});
+addBoard("languages", "Edexcel", {
+  paper: "Edexcel GCSE French 1FR0 Paper 3 'Reading and understanding' Higher (about 50 marks): Section A short English answers, multiple-choice letters and naming people (28), Section B multiple choice and short answers in French (15), Section C an English-to-French translation (7).",
+  marking: "Comprehension: credit the key idea; acceptable alternatives are listed and vague or incomplete answers, wrong detail or lifting a non-key part of the text are rejected; whole-sentence lifts are rejected in some items. Answers to French-language questions must be in French. Translation (7 marks) is marked on overall meaning in four bands: 0; 1-3 meaning partly communicated; 4-6 mostly communicated with occasional errors affecting clarity; 7 fully communicated with errors that do not detract.",
+  sources: ["Edexcel 1FR0/3H mark scheme (June 2023)"],
+});
+addBoard("pe", "Edexcel", {
+  paper: "Edexcel GCSE PE 1PE0 Component 1 'Fitness and body systems', 80 marks: Section A (about 40), Section B (31) and Section C (9); one-mark multiple choice, matching and table completion, 1-3 mark short items, data interpretation and one 9-mark extended question.",
+  marking: "9 marks: L1 (1-3), L2 (4-6), L3 (7-9), rewarding accurate technical knowledge (AO1), detailed application to the context (AO2) and a valid, well-reasoned conclusion backed by evidence (AO3); knowledge alone cannot go beyond Level 1. Short items: one mark per correct point, or a point plus a linked development. A sporting example is credited when it correctly links the content to a sport or activity (for example a high-jump take-off or a sprint start). Multiple choice credits only the single correct option; 'accept other appropriate responses'.",
+  sources: ["Edexcel 1PE0/01 mark scheme (June 2023)"],
+});
+
 const text = (names) => names.map((n) => String(n ?? "")).filter((n) => n.trim()).join(" | ");
 
 /** The guide entry for a subject (pass the subject name, then the topic as a fallback). */
