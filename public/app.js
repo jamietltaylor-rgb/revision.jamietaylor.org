@@ -1008,7 +1008,7 @@ async function submitExam(written) {
   let result;
   try {
     if (!cloud.signedIn) throw new Error("local");
-    result = { ...(await cloud.markAnswer({ q: q.q, a: q.a, marks: q.marks, answer: given, kind: L.examKindOf(q), subject: ((state.subjects.find((s) => s.id === q.subjectId) || {}).name) || "", ...(q.ctx ? { ctx: q.ctx } : {}) })), source: "ai" };
+    result = { ...(await cloud.markAnswer({ q: q.q, a: q.a, marks: q.marks, answer: given, kind: L.examKindOf(q), subject: ((state.subjects.find((s) => s.id === q.subjectId) || {}).name) || "", board: state.settings.board || "", ...(q.ctx ? { ctx: q.ctx } : {}) })), source: "ai" };
   } catch {
     result = { ...L.markLocally(given, q.a, q.marks, L.examKindOf(q)), feedback: "", source: "local" };
   }
