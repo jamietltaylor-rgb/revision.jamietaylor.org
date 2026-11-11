@@ -937,24 +937,67 @@ const GENERIC_BOARD_QUESTIONS = [
   { id: "code", q: "Look at the {subject} code on a paper or your entry list. What does it look like?", options: [["A 4-digit number starting with 8 (like 8300)", BQ(["AQA", 4])], ["A number, two letters, then a number (like 1MA1 or 1BI0)", BQ(["Edexcel", 4])], ["A J then 3 digits (like J560)", BQ(["OCR", 4])], ["A C then digits (like C300U10)", BQ(["WJEC / Eduqas", 3])], ["A G then digits", BQ(["CCEA", 3])], ["I can't find one", {}]] },
 ];
 const sciencePaper = (subject, aqa, edexcel, gateway) => ({ id: "paper", q: `What is in your ${subject} Paper 1 (or what is the course called)?`, options: [[aqa, BQ(["AQA", 4])], [edexcel, BQ(["Edexcel", 4])], [gateway, BQ(["OCR", 4])], [`The course or paper is called "Concepts in ${subject}"`, BQ(["WJEC / Eduqas", 4])], PAPER_NAME_NONE] });
+const TYPES = (q, ...rows) => ({ id: "types", q, options: [...rows.map(([label, board, n]) => [label, BQ([board, n])]), ["I'm not sure what mine are like", {}]] });
+const sciTypes = (w) => TYPES("What do your papers look like? (Think about how many marks, how the questions are split up and what comes first.)",
+  ["About 90 marks, and the paper starts with 15 one-mark multiple-choice questions", "OCR", w + 1],
+  ["100 marks, in six long questions that are each built around one situation (for example one experiment or one story)", "AQA", w],
+  ["100 marks, in about ten questions of 6-12 marks, with two or so 6-mark extended answers", "Edexcel", w],
+  ["Around 120 marks and the course is called Concepts in …", "WJEC / Eduqas", w - 1]);
 /** Extra clues that only work for one subject. Keyed by the subject's guide id (see examguides.js). */
 export const SUBJECT_CLUES = {
-  "english-language": [{ id: "paper", q: "What is English Language Paper 1 (or Component 1) called?", options: [["Explorations in creative reading and writing", BQ(["AQA", 4])], ["Fiction and imaginative writing", BQ(["Edexcel", 4])], ["Communicating information and ideas", BQ(["OCR", 4])], ["20th Century Literature Reading and Creative Prose Writing", BQ(["WJEC / Eduqas", 4])], PAPER_NAME_NONE] }],
-  "english-literature": [{ id: "paper", q: "What is the first English Literature paper called?", options: [["Shakespeare and the 19th-century novel", BQ(["AQA", 4])], ["Shakespeare and post-1914 literature", BQ(["Edexcel", 4])], ["Exploring modern and literary heritage texts", BQ(["OCR", 4])], ["Shakespeare and Poetry", BQ(["WJEC / Eduqas", 4])], PAPER_NAME_NONE] }],
+  "english-language": [TYPES("Which of these question types are on your English Language Paper 1 or Component 1?",
+    ["Question 1 asks me to list four things from a few lines, and there is a 20-mark 'evaluate' question", "AQA", 5],
+    ["Question 1 is a single mark to find one point, and there is a 15-mark question on how successfully the extract creates a feeling", "Edexcel", 5],
+    ["Question 1 is a 4-mark find-and-quote question, and there is an 18-mark 'how far do you agree' question about two texts", "OCR", 5],
+    ["Question 1 asks me to list five things about a character, and every reading question is about one story extract", "WJEC / Eduqas", 5]), { id: "paper", q: "What is English Language Paper 1 (or Component 1) called?", options: [["Explorations in creative reading and writing", BQ(["AQA", 4])], ["Fiction and imaginative writing", BQ(["Edexcel", 4])], ["Communicating information and ideas", BQ(["OCR", 4])], ["20th Century Literature Reading and Creative Prose Writing", BQ(["WJEC / Eduqas", 4])], PAPER_NAME_NONE] }],
+  "english-literature": [TYPES("Which of these question types are on your English Literature papers?",
+    ["'Starting with this extract…' then 'in the play as a whole' (30 marks, plus a few spelling marks)", "AQA", 5],
+    ["Part (a) is a character in an extract (20 marks) and part (b) is a theme from elsewhere in the play (20 marks)", "Edexcel", 5],
+    ["I compare an extract with an unseen extract (20 marks), and there is a 36-mark novel question", "OCR", 5],
+    ["A 15-mark extract question, a 25-mark whole-play question, and a poem compared with another poem", "WJEC / Eduqas", 5]), { id: "paper", q: "What is the first English Literature paper called?", options: [["Shakespeare and the 19th-century novel", BQ(["AQA", 4])], ["Shakespeare and post-1914 literature", BQ(["Edexcel", 4])], ["Exploring modern and literary heritage texts", BQ(["OCR", 4])], ["Shakespeare and Poetry", BQ(["WJEC / Eduqas", 4])], PAPER_NAME_NONE] }],
   maths: [
     { id: "paper", q: "How are your Maths papers named?", options: [["Paper 1, Paper 2 and Paper 3", BQ(["AQA", 1], ["Edexcel", 1], ["OCR", 1])], ["Component 1 and Component 2", BQ(["WJEC / Eduqas", 5])], ["Units, such as M3 or M7", BQ(["CCEA", 5])], PAPER_NAME_NONE] },
     { id: "marks", q: "How many marks is each Maths paper out of?", options: [["80", BQ(["AQA", 2], ["Edexcel", 2])], ["100", BQ(["OCR", 4])], ["I don't know", {}]] },
   ],
-  biology: [sciencePaper("Biology", "Cell biology; Organisation; Infection and response; Bioenergetics", "Key concepts in biology; Cells and control; Genetics; Health, disease and medicines", 'The course is called "Gateway Science" (paper J247/01)')],
-  chemistry: [sciencePaper("Chemistry", "Atomic structure and the periodic table; Bonding; Quantitative chemistry; Chemical changes; Energy changes", "Key concepts in chemistry; States of matter and mixtures; Chemical changes; Extracting metals and equilibria", 'The course is called "Gateway Science" (paper J248/01)')],
-  physics: [sciencePaper("Physics", "Energy; Electricity; Particle model of matter; Atomic structure", "Key concepts of physics; Motion and forces; Conservation of energy; Waves; Light and the EM spectrum; Radioactivity", 'The course is called "Gateway Science" (paper J249/01)')],
-  business: [{ id: "paper", q: "What is Business Paper 1 (or Component 1) called, or what is its first theme?", options: [["Influences of operations and HRM on business activity", BQ(["AQA", 4])], ["Theme 1: Investigating small business", BQ(["Edexcel", 4])], ["Business 1: Business activity, marketing and people", BQ(["OCR", 4])], ["Business Dynamics", BQ(["WJEC / Eduqas", 4])], PAPER_NAME_NONE] }],
-  "computer-science": [{ id: "paper", q: "What is Computer Science Paper 1 called?", options: [["Computational thinking and problem solving", BQ(["AQA", 4])], ["Principles of computer science", BQ(["Edexcel", 4])], ["Computer systems", BQ(["OCR", 4])], ["Understanding Computer Science", BQ(["WJEC / Eduqas", 4])], PAPER_NAME_NONE] }],
+  biology: [sciTypes(4), sciencePaper("Biology", "Cell biology; Organisation; Infection and response; Bioenergetics", "Key concepts in biology; Cells and control; Genetics; Health, disease and medicines", 'The course is called "Gateway Science" (paper J247/01)')],
+  chemistry: [sciTypes(3), sciencePaper("Chemistry", "Atomic structure and the periodic table; Bonding; Quantitative chemistry; Chemical changes; Energy changes", "Key concepts in chemistry; States of matter and mixtures; Chemical changes; Extracting metals and equilibria", 'The course is called "Gateway Science" (paper J248/01)')],
+  physics: [sciTypes(3), sciencePaper("Physics", "Energy; Electricity; Particle model of matter; Atomic structure", "Key concepts of physics; Motion and forces; Conservation of energy; Waves; Light and the EM spectrum; Radioactivity", 'The course is called "Gateway Science" (paper J249/01)')],
+  history: [TYPES("Which of these question types are on your History papers?",
+    ["'Describe two features of…' (4 marks), 'How useful are Sources A and B…' (8 marks) and 'How far do you agree' (16 marks)", "Edexcel", 5],
+    ["'Why might the authors' views differ?' (4 marks), which interpretation is more convincing (8 marks) and which of two factors saw more important change (12 marks)", "AQA", 5],
+    ["An organised summary (9 marks), 'Explain why' (10 marks) and 'How far' (18 marks)", "OCR", 5],
+    ["'What is the purpose of this source?' (8 marks), 'Which of two sources is more useful?' (11 marks) and 'Assess the extent to which' (16 marks)", "WJEC / Eduqas", 5])],
+  geography: [TYPES("Which of these question types are on your Geography papers?",
+    ["The longest questions are 9 marks and three of those marks are for spelling, punctuation and grammar", "AQA", 5],
+    ["8-mark questions where 4 marks are for using the maps, photos or figures I am given", "Edexcel", 5],
+    ["Levelled questions of 6, 8 and 12 marks", "OCR", 4],
+    ["Single-mark grid-reference or compass items, an 8-mark evaluation with a justified decision, and a 12-mark answer with 4 spelling marks", "WJEC / Eduqas", 4])],
+  "religious-studies": [TYPES("Which of these question types are on your Religious Studies papers?",
+    ["Parts worth 1, 2, 4, 5 and 12 marks, and the 12-mark part has 3 spelling marks", "AQA", 5],
+    ["A 3-mark list, a 4-mark and 5-mark explanation (one mark for a source of wisdom or authority), and a 12-mark 'evaluate'", "Edexcel", 5],
+    ["Three 3-mark parts, a 6-mark part, and a starred 'Discuss' question worth 15 or 18 marks", "OCR", 5],
+    ["A 2-mark definition, a 5-mark part, an 8-mark part on two religions, and a 15-mark 'evaluate'", "WJEC / Eduqas", 5])],
+  psychology: [TYPES("Which of these question types are on your Psychology papers?",
+    ["Multiple choice, short, calculation and design questions, and 9-mark 'describe and evaluate' answers on 100-mark papers", "AQA", 5],
+    ["Six sections, mostly 1-2 mark questions, 4-mark strength or weakness items and two 9-mark questions at the end (80 marks)", "Edexcel", 5],
+    ["'Outline', 'describe' and 'explain' items, application questions about a named case, and a 13-mark extended question", "OCR", 5])],
+  pe: [TYPES("Which of these question types are on your PE papers?",
+    ["A 78-mark paper with questions from 1 up to 9 marks", "AQA", 4],
+    ["An 80-mark paper in Sections A, B and C that ends with one 9-mark question", "Edexcel", 5],
+    ["A 60-mark paper with 20 short questions first, then a 4-mark training-principles item and a 6-mark extended answer", "OCR", 5])],
+  business: [TYPES("Which of these question types are on your Business papers?",
+    ["Two 90-mark papers (Theme 1 and Theme 2), each section built on a different case-study business and ending with a 12-mark question", "Edexcel", 5],
+    ["15 multiple-choice questions first, then case-study questions of 1, 2, 3, 6, 7 and 9 marks", "OCR", 5],
+    ["Short questions first, then four 20-mark case-study questions each ending in a long 'assess', 'discuss' or 'advise' part", "WJEC / Eduqas", 5]), { id: "paper", q: "What is Business Paper 1 (or Component 1) called, or what is its first theme?", options: [["Influences of operations and HRM on business activity", BQ(["AQA", 4])], ["Theme 1: Investigating small business", BQ(["Edexcel", 4])], ["Business 1: Business activity, marketing and people", BQ(["OCR", 4])], ["Business Dynamics", BQ(["WJEC / Eduqas", 4])], PAPER_NAME_NONE] }],
+  "computer-science": [TYPES("Which of these question types are on your Computer Science Paper 1?",
+    ["Six questions on hardware, memory and storage, networks, security, software and ethics (about 80 marks)", "OCR", 5],
+    ["About 75 marks over five questions with lettered parts, including truth tables, flowcharts and one 6-mark question", "Edexcel", 5],
+    ["14 questions (100 marks) including binary addition with overflow, Boolean simplification, bubble sort and a 9-mark extended answer", "WJEC / Eduqas", 5]), { id: "paper", q: "What is Computer Science Paper 1 called?", options: [["Computational thinking and problem solving", BQ(["AQA", 4])], ["Principles of computer science", BQ(["Edexcel", 4])], ["Computer systems", BQ(["OCR", 4])], ["Understanding Computer Science", BQ(["WJEC / Eduqas", 4])], PAPER_NAME_NONE] }],
 };
 /** The quiz for one subject (a guide id such as "biology", or null when we don't know the subject): the general clues plus that subject's own. */
 export function boardQuizFor(guideId, subjectName = "this subject") {
   const subject = String(subjectName || "this subject");
-  return [...GENERIC_BOARD_QUESTIONS, ...(SUBJECT_CLUES[guideId] || [])].map((q) => ({ ...q, q: q.q.replace("{subject}", subject) }));
+  return [...(SUBJECT_CLUES[guideId] || []), ...GENERIC_BOARD_QUESTIONS].map((q) => ({ ...q, q: q.q.replace("{subject}", subject) }));
 }
 /** answers: { questionId: optionIndex }. Returns the boards ranked by points, and how sure the guess is. */
 export function scoreBoardQuiz(answers = {}, guideId = null) {

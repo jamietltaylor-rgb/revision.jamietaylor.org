@@ -768,3 +768,17 @@ test("each subject can have its own exam board, with the general one as the fall
   const clean = L.sanitiseState({ subjects: [], settings: { board: "AQA", subjectBoards: { a: "Edexcel", b: "Any exam board", c: "Nope" } } });
   assert.deepEqual(clean.settings.subjectBoards, { a: "Edexcel" });
 });
+
+test("the exam board quiz can tell the boards apart from the types of question", () => {
+  const pick = (id, qid, text) => { const qs = L.boardQuizFor(id, "X"); return qs.find((q) => q.id === qid).options.findIndex(([label]) => label.startsWith(text)); };
+  assert.equal(L.scoreBoardQuiz({ types: pick("history", "types", "'Describe two features") }, "history").best, "Edexcel");
+  assert.equal(L.scoreBoardQuiz({ types: pick("history", "types", "An organised summary") }, "history").best, "OCR");
+  assert.equal(L.scoreBoardQuiz({ types: pick("english-language", "types", "Question 1 asks me to list four") }, "english-language").best, "AQA");
+  assert.equal(L.scoreBoardQuiz({ types: pick("biology", "types", "About 90 marks") }, "biology").best, "OCR");
+  assert.equal(L.scoreBoardQuiz({ types: pick("business", "types", "Short questions first") }, "business").best, "WJEC / Eduqas");
+  assert.equal(L.scoreBoardQuiz({ types: pick("geography", "types", "8-mark questions where") }, "geography").best, "Edexcel");
+  const hist = L.boardQuizFor("history", "History");
+  assert.equal(hist[0].id, "types", "the question-type clue is asked first");
+  const strong = L.scoreBoardQuiz({ types: pick("history", "types", "An organised summary"), code: L.boardQuizFor("history").find((q) => q.id === "code").options.findIndex(([l]) => l.startsWith("A J then")) }, "history");
+  assert.equal(strong.sure, "high");
+});
