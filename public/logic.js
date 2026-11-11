@@ -928,7 +928,7 @@ export const STYLES = { typed: "typed answers", choice: "multiple choice", gapfi
 /** The text people copy into another AI (ChatGPT, Gemini…) to get questions this app can read. */
 export const BOARDS = ["Any exam board", "AQA", "Edexcel", "OCR", "WJEC / Eduqas", "CCEA", "SQA"];
 
-export function buildAiPrompt({ topic, level = "GCSE", count = 15, style = "gapfill", paper = false, board = "", mode = "quick", kinds, subject = "" } = {}) {
+export function buildAiPrompt({ topic, level = "GCSE", count = 15, style = "gapfill", styles, paper = false, board = "", mode = "quick", kinds, subject = "" } = {}) {
   const t = clean(topic).slice(0, 120) || "[type your topic here]";
   const n = Math.max(1, Math.min(50, Math.round(Number(count)) || 15));
   const lvl = clean(level) || "GCSE";
@@ -951,12 +951,15 @@ ${used.map((k, i) => `- ${k}: ${guides[i].rules}`).join("\n")}
 - Do not put the number of marks in the question text — the app shows it. Real command words only. Marking points must be factually correct and short.
 - No markdown, no numbering, no text outside the JSON.${business ? "\n- This is modelled on the Edexcel GCSE Business papers: questions about a made-up business, with 'Outline one…', 'Explain one…', 'Analyse the impact on…' and 'Justify…' command words." : ""}${paperLines(paper, board, lvl)}`;
   }
-  const styleLine = {
+  let styleLine = {
     typed: "Do not include wrong options — every question is answered by typing.",
     choice: "Give 3 wrong options for every question (so each one is multiple choice).",
     mixed: "Give 3 wrong options for about half the questions and none for the rest.",
     gapfill: "Every question is a GAP FILL: one sentence about the topic with a single blank written as _____ where a key word or short phrase is missing, and the answer is the missing word(s). Do not include wrong options.",
   }[style] || "";
+  const chosen = (Array.isArray(styles) ? styles : []).filter((x) => ["typed", "choice", "gapfill"].includes(x));
+  if (chosen.length > 1) styleLine = `Make a mix of these kinds, in roughly equal numbers and a mixed-up order: ${chosen.map((x) => ({ typed: "typed (no wrong options)", choice: "multiple choice (3 wrong options)", gapfill: "gap fill (one sentence with a single blank written as _____, the answer is the missing word(s), no wrong options)" }[x])).join("; ")}.`;
+  else if (chosen.length === 1) styleLine = ({ typed: "Do not include wrong options — every question is answered by typing.", choice: "Give 3 wrong options for every question (so each one is multiple choice).", gapfill: "Every question is a GAP FILL: one sentence about the topic with a single blank written as _____ where a key word or short phrase is missing, and the answer is the missing word(s). Do not include wrong options." })[chosen[0]];
   return `Write ${n} revision questions about "${t}" at ${lvl} level.${tailor}
 
 Reply with ONLY the questions, one per line, in exactly this format:

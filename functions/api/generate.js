@@ -33,7 +33,11 @@ function readRequest(body) {
   const level = String(body.level || "GCSE").replace(/\s+/g, " ").trim().slice(0, 40) || "GCSE";
   const mode = body.mode === "exam" ? "exam" : "quick";
   let count = Math.max(1, Math.min(mode === "exam" ? 6 : 15, Math.round(Number(body.count)) || (mode === "exam" ? 5 : 10)));
-  const style = STYLES.includes(body.style) ? body.style : "typed";
+  // One or more answer styles. "styles" is a list; a single "style" (older callers) still works, and "mixed" means typed + multiple choice.
+  const wantedStyles = Array.isArray(body.styles) ? body.styles : [body.style === "mixed" ? "typed" : body.style, ...(body.style === "mixed" ? ["choice"] : [])];
+  const styles = [...new Set(wantedStyles.filter((x) => STYLES.includes(x) && x !== "mixed"))];
+  if (!styles.length) styles.push("typed");
+  const style = styles.length === 1 ? styles[0] : "multi";
   const avoid = (Array.isArray(body.avoid) ? body.avoid : []).map((x) => String(x || "").replace(/\s+/g, " ").trim().slice(0, 140)).filter(Boolean).slice(0, 30);
   const paper = body.paper === true;
   const subject = String(body.subject || "").replace(/\s+/g, " ").trim().slice(0, 60);
@@ -50,9 +54,9 @@ function readRequest(body) {
     plan = given.length ? given : examPlan(count, kinds);
     count = plan.length || count;
     kinds = PAPER_ORDER.filter((k) => kinds.includes(k));
-    return { topic, level, count, style, avoid, paper, board, mode, subject, kinds, plan, explicit };
+    return { topic, level, count, style, styles, avoid, paper, board, mode, subject, kinds, plan, explicit };
   }
-  return { topic, level, count, style, avoid, paper, board, mode, subject };
+  return { topic, level, count, style, styles, avoid, paper, board, mode, subject };
 }
 
 const FIGURE_SHAPES = {
@@ -94,14 +98,20 @@ ${avoid.length ? "- Do NOT repeat or rephrase any of these existing questions (t
   ];
 }
 
-function buildMessages({ topic, level, count, style, avoid = [], paper = false, board = "", mode = "quick", subject = "", plan = [], kinds = [] }) {
+const STYLE_PARTS = {
+  typed: 'TYPED questions (answered by typing; empty "wrong" list)',
+  choice: 'MULTIPLE CHOICE questions (exactly 3 plausible but clearly wrong options in "wrong")',
+  gapfill: 'GAP FILL questions ("q" is one sentence with a single blank written as _____ where a key word is missing, "a" is the missing word(s); empty "wrong" list)',
+};
+const multiStyleRule = (styles) => `Make a mix of these kinds of question, in roughly equal numbers and in a mixed-up order: ${styles.map((x) => STYLE_PARTS[x]).join("; ")}.`;
+function buildMessages({ topic, level, count, style, styles = [], avoid = [], paper = false, board = "", mode = "quick", subject = "", plan = [], kinds = [] }) {
   if (mode === "exam") return buildExamMessages({ topic, level, count, avoid, paper, board, subject, plan, kinds });
   const styleRule = {
     typed: 'Every question is answered by typing, so use an empty "wrong" list.',
     choice: 'Give exactly 3 plausible but clearly wrong options in "wrong" for every question.',
     gapfill: 'Every question is a GAP FILL: "q" is one sentence about the topic with a single blank written as _____ where a key word or short phrase is missing (e.g. "Plants make glucose by a process called _____."), and "a" is just the missing word(s). The sentence must have one clear answer. Use an empty "wrong" list.',
     mixed: 'Give exactly 3 plausible but clearly wrong options in "wrong" for about half the questions, and an empty list for the rest.',
-  }[style];
+  }[style] || multiStyleRule(styles);
   return [
     { role: "system", content: "You write accurate revision questions for students. You reply with a JSON array and nothing else." },
     { role: "user", content:
@@ -202,7 +212,7 @@ export async function onRequestPost({ request, env }) {
     try {
       const out = await env.AI.run(model, { messages: buildMessages(req), max_tokens: req.mode === "exam" ? 6000 : 2500, temperature: 0.3 });
       let items = extract(out && out.response !== undefined ? out.response : out, req.mode, req.subject, req.topic, req.kinds);
-      if (req.mode === "quick" && req.style === "gapfill") items = items.filter((it) => /_{2,}|\.{4,}|…{2,}/.test(it.q)); // a gap fill needs its gap
+      if (req.mode === "quick" && req.styles.length === 1 && req.styles[0] === "gapfill") items = items.filter((it) => /_{2,}|\.{4,}|…{2,}/.test(it.q)); // a gap fill needs its gap
       const seen = new Set();
       const label = req.board === "Any exam board" ? "Past-paper style" : `${req.board} past-paper style`;
       const unique = items.filter((it) => { const k = it.q.toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true; });

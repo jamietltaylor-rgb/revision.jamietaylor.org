@@ -216,3 +216,11 @@ test("gap fill asks for sentences with a blank and drops questions that have non
   assert.match(prompt, /GAP FILL/); assert.match(prompt, /_____/);
   assert.deepEqual(r.body.questions.map((q) => q.q), ["Plants make glucose by _____."]);
 });
+
+test("several styles can be ticked at once and are asked for as a mix", async () => {
+  stubAuth(); let prompt = "";
+  const reply = JSON.stringify([{ q: "Plants make glucose by _____.", a: "photosynthesis" }, { q: "What do plants make?", a: "glucose", wrong: ["salt", "iron", "sand"] }]);
+  const r = await call(post({ topic: "Plants", count: 5, styles: ["gapfill", "choice"] }), env({ run: async (m, i) => { prompt = i.messages[1].content; return { response: reply }; } }));
+  assert.match(prompt, /mix of these kinds/); assert.match(prompt, /GAP FILL/); assert.match(prompt, /MULTIPLE CHOICE/);
+  assert.equal(r.body.questions.length, 2, "a mix keeps the questions that are not gap fills");
+});

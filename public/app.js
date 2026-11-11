@@ -26,7 +26,7 @@ let lastChest = null;
 const auth = { mode: "in", username: "", password: "", confirm: "", error: "", busy: false };
 const draft = {
   subjectId: "", newSubject: "", q: "", a: "", wrong: "",
-  topic: "", level: "GCSE", count: "10", style: "gapfill", busy: false, progress: "", aiError: "", prompt: "", paper: false, board: "Any exam board", boardInit: false, mode: "quick", kinds: null, allKinds: false,
+  topic: "", level: "GCSE", count: "10", style: "gapfill", styles: ["gapfill"], busy: false, progress: "", aiError: "", prompt: "", paper: false, board: "Any exam board", boardInit: false, mode: "quick", kinds: null, allKinds: false,
   pet: "buddy", paste: "", preview: null, filter: "all", search: "", treatName: "", treatCost: "",
 };
 
@@ -1221,7 +1221,7 @@ async function makeWithAi() {
       const part = remaining ? remaining.slice(0, chunk) : null;
       const ask = part ? part.length : Math.min(chunk, total - items.length);
       if (!ask) break;
-      const r = await cloud.generate({ topic, subject: chosenSubjectName(), level: draft.level, count: ask, style: draft.style, paper: draft.paper, board: draft.board, mode: draft.mode, ...(part ? { kinds, plan: part } : {}), avoid: items.slice(-30).map((x) => x.q) });
+      const r = await cloud.generate({ topic, subject: chosenSubjectName(), level: draft.level, count: ask, style: draft.style, styles: draft.styles, paper: draft.paper, board: draft.board, mode: draft.mode, ...(part ? { kinds, plan: part } : {}), avoid: items.slice(-30).map((x) => x.q) });
       const got = (Array.isArray(r && r.questions) ? r.questions : []).filter((x) => x && x.q && x.a);
       let fresh = 0;
       for (const x of got) {
@@ -1260,7 +1260,7 @@ async function checkMaker() {
   }
 }
 async function copyPrompt() {
-  draft.prompt = L.buildAiPrompt({ topic: draft.topic, level: draft.level, count: wantedCount(), style: draft.style, paper: draft.paper, board: draft.board, mode: draft.mode, subject: chosenSubjectName(), ...(draft.mode === "exam" ? { kinds: examKinds() } : {}) });
+  draft.prompt = L.buildAiPrompt({ topic: draft.topic, level: draft.level, count: wantedCount(), style: draft.style, styles: draft.styles, paper: draft.paper, board: draft.board, mode: draft.mode, subject: chosenSubjectName(), ...(draft.mode === "exam" ? { kinds: examKinds() } : {}) });
   let copied = false;
   try { await navigator.clipboard.writeText(draft.prompt); copied = true; } catch { copied = false; }
   toast(copied ? "Prompt copied — paste it into another AI ✓" : "Copy the prompt from the box below.");
@@ -1376,7 +1376,13 @@ function viewQuestions() {
       h("label", {}, `How many (1–${maxCount()})`, h("input", { type: "number", inputmode: "numeric", min: "1", max: String(maxCount()), step: "1", value: draft.count, "aria-label": "How many questions",
         oninput: (e) => { draft.count = e.target.value; }, onblur: (e) => { draft.count = String(wantedCount()); e.target.value = draft.count; } }),
         h("span", { class: "row", style: "gap:.35rem;margin-top:.35rem" }, (draft.mode === "exam" ? [3, 5, 10, 15, 20] : [5, 10, 15, 25, 40]).map((n) => h("button", { type: "button", class: "small" + (String(n) === String(draft.count) ? " primary" : ""), onclick: () => { draft.count = String(n); render(); } }, String(n))))),
-      draft.mode === "quick" && h("label", {}, "Style", h("select", { onchange: (e) => { draft.style = e.target.value; } }, [["gapfill", "Gap fill"], ["typed", "Type the answer"], ["choice", "Multiple choice"]].map(([v, l]) => opt(v, l, draft.style)))),
+      draft.mode === "quick" && h("div", { style: "margin:0 0 .7rem" },
+        h("div", { class: "small", style: "font-weight:700;margin-bottom:.35rem" }, "Style (tick one or more for a mix)"),
+        h("div", { class: "chips", role: "group", "aria-label": "Question style" }, [["gapfill", "Gap fill"], ["typed", "Type the answer"], ["choice", "Multiple choice"]].map(([v, l]) => h("button", { type: "button", class: "chip" + (draft.styles.includes(v) ? " on" : ""), "aria-pressed": draft.styles.includes(v) ? "true" : "false", onclick: () => {
+          if (draft.styles.includes(v)) { if (draft.styles.length === 1) return toast("Keep at least one style ticked."); draft.styles = draft.styles.filter((x) => x !== v); } else draft.styles = ["gapfill", "typed", "choice"].filter((x) => x === v || draft.styles.includes(x));
+          draft.style = draft.styles[0];
+          render();
+        } }, l)))),
       h("label", {}, "Exam board", h("select", { "aria-label": "Exam board", onchange: (e) => { draft.board = e.target.value; state.settings.board = e.target.value === "Any exam board" ? "" : e.target.value; save(); render(); } }, L.BOARDS.map((x) => opt(x, x, draft.board))))),
     h("label", {}, "Type of questions", h("select", { "aria-label": "Type of questions", onchange: (e) => { draft.mode = e.target.value; if (draft.mode === "exam" && Number(draft.count) > 20) draft.count = "5"; render(); } },
       [["quick", "Quick questions (short answers)"], ["exam", "Complete exam questions (marks + mark scheme)"]].map(([v, l]) => opt(v, l, draft.mode)))),

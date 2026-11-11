@@ -735,3 +735,8 @@ test("the copy-a-prompt text can ask for gap fill", () => {
   const p = L.buildAiPrompt({ topic: "Cells", style: "gapfill" });
   assert.match(p, /GAP FILL/); assert.match(p, /_____/);
 });
+
+test("the pasted prompt can ask for a mix of styles", () => {
+  const p = L.buildAiPrompt({ topic: "Cells", styles: ["typed", "gapfill"] });
+  assert.match(p, /mix of these kinds/); assert.match(p, /gap fill/); assert.doesNotMatch(p, /Give 3 wrong options for every question/);
+});
