@@ -40,6 +40,12 @@ test("board-specific notes only appear for that board", () => {
   assert.equal(guideForQuestions("AQA", "Latin"), "");
 });
 
+test("OCR notes are added to every subject that has them", () => {
+  for (const id of ["maths","english-language","english-literature","biology","chemistry","physics","history","geography","computer-science","religious-studies","psychology","business","pe"]) assert.ok(GUIDES.find((g) => g.id === id).boards.OCR, id);
+  assert.match(guideForQuestions("OCR", "Maths"), /J560/);
+  assert.match(guideForMarking("OCR", "Physics"), /ECF/);
+});
+
 test("Edexcel notes are added to every subject that has them", () => {
   for (const id of ["english-language","english-literature","biology","chemistry","physics","history","geography","computer-science","religious-studies","psychology","languages","pe","business","maths"]) assert.ok(GUIDES.find((g) => g.id === id).boards.Edexcel, id);
   assert.match(guideForMarking("Edexcel", "Physics"), /power-of-ten/);
@@ -53,7 +59,7 @@ test("every guide has style, marking and sources for its boards", () => {
     for (const [b, v] of Object.entries(g.boards)) { assert.ok(v.paper && v.sources.length, `${g.id}/${b}`); }
     assert.ok(g.general.style.length < 900 && g.general.marking.length < 1500, `${g.id} stays short enough for the prompt`);
   }
-  assert.ok(guideSources().length >= 26);
+  assert.ok(guideSources().length >= 38);
 });
 
 test("the question maker and the marker both receive the guide", async () => {
