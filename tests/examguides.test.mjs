@@ -23,7 +23,12 @@ test("subjects find the right guide", () => {
   assert.equal(findGuide("English Literature").id, "english-literature");
   assert.equal(findGuide("Computer Science").id, "computer-science", "not the sciences");
   assert.equal(findGuide("", "Cells and photosynthesis in biology").id, "biology", "falls back to the topic");
-  assert.equal(findGuide("French"), null);
+  assert.equal(findGuide("French").id, "languages");
+  assert.equal(findGuide("Religious Studies").id, "religious-studies");
+  assert.equal(findGuide("Psychology").id, "psychology");
+  assert.equal(findGuide("Sociology").id, "sociology");
+  assert.equal(findGuide("PE").id, "pe");
+  assert.equal(findGuide("Latin"), null, "no guide yet");
 });
 
 test("board-specific notes only appear for that board", () => {
@@ -32,7 +37,7 @@ test("board-specific notes only appear for that board", () => {
   assert.match(guideForQuestions("Any exam board", "Business"), /command word|marks/i);
   assert.match(guideForMarking("AQA", "English Language"), /L4 7-8/);
   assert.doesNotMatch(guideForMarking("OCR", "English Language"), /L4 7-8/);
-  assert.equal(guideForQuestions("AQA", "French"), "");
+  assert.equal(guideForQuestions("AQA", "Latin"), "");
 });
 
 test("every guide has style, marking and sources for its boards", () => {
@@ -41,7 +46,7 @@ test("every guide has style, marking and sources for its boards", () => {
     for (const [b, v] of Object.entries(g.boards)) { assert.ok(v.paper && v.sources.length, `${g.id}/${b}`); }
     assert.ok(g.general.style.length < 900 && g.general.marking.length < 1500, `${g.id} stays short enough for the prompt`);
   }
-  assert.ok(guideSources().length >= 10);
+  assert.ok(guideSources().length >= 15);
 });
 
 test("the question maker and the marker both receive the guide", async () => {

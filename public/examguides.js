@@ -157,6 +157,77 @@ export const GUIDES = [
       },
     },
   },
+  {
+    id: "religious-studies",
+    subject: /\b(religious|theology|philosophy|ethics)\b/i,
+    general: {
+      style: "Belief and teachings questions. Typical stems: 1 mark = multiple choice; 2 marks = 'Give two...'; 4 marks = 'Explain two beliefs / contrasting beliefs...' (each worth 1 mark for a simple explanation or 2 for a developed one, and it must refer to a religious tradition); 5 marks = 'Explain two reasons/beliefs... and refer to a source of wisdom and authority' (the source reference is worth 1 mark); 12 marks (+3 for spelling, punctuation and grammar) = 'Evaluate this statement': reasoned arguments for and against, religious arguments, and a justified conclusion.",
+      marking: "'Give two': one mark per correct point and only the first two are marked. 'Explain two': 1 mark for a simple explanation or 2 for a detailed one, for each belief. For the 12-mark answer: Level 4 (10-12) = a well-argued response with reasoned consideration of different views, logical chains of reasoning leading to a judgement, and religion applied to the issue; Level 3 (7-9) = reasoned consideration of different views with clear reference to religion; Level 2 (4-6) = reasoned consideration of one view, or different views each supported, and capped at Level 2 if there is no reference to religion; Level 1 (1-3) = a point of view with reasons stated. Best-fit the level first, then the mark. SPaG (3 marks): high accuracy and a wide range of specialist terms = 3, considerable = 2, reasonable = 1.",
+    },
+    boards: {
+      AQA: {
+        paper: "AQA GCSE Religious Studies A 8062: two papers (beliefs and teachings of two religions, then themes such as relationships, life issues, peace and conflict and crime and punishment), each question split into parts worth 1, 2, 4, 5 and 12 marks; the 12-mark part also carries 3 SPaG marks.",
+        sources: ["AQA 80622A mark scheme (June 2023)"],
+      },
+    },
+  },
+  {
+    id: "psychology",
+    subject: /\bpsychology\b/i,
+    general: {
+      style: "Short and medium items on memory, perception, development, research methods and other topic areas, with some set around a short scenario. Mark values 1-6 and 9: 1 mark multiple choice or short calculation; 2 marks definitions, explanations, conclusions; 3 marks describe/explain; 4-5 marks evaluate or explain a concept; 6 marks design a study (component points); 9 marks 'describe and evaluate' a theory or study.",
+      marking: "A 2-mark outline gives 2 for a clear and accurate response and 1 for a limited or muddled one; some questions give 1 mark for a correct statement and 1 for the explanation. 4-, 5- and 9-mark answers are level-marked. A 6-mark 'design a study' question is marked by components (the task and data, the independent variable, and an extraneous variable with how it is controlled, up to 2 each), not by levels. Credit accurate key terminology, accurate detail of studies, application to the scenario, and evaluation with a supported conclusion; other valid content is credited.",
+    },
+    boards: {
+      AQA: {
+        paper: "AQA GCSE Psychology 8182: Paper 1 (cognition and behaviour: memory, perception, development, research methods) and Paper 2 (social context and behaviour: social influence, language, brain and neuropsychology, psychological problems); 100 marks each, a mix of multiple-choice, short, calculation, design and 9-mark describe-and-evaluate questions.",
+        sources: ["AQA 81821 mark scheme (June 2023)"],
+      },
+    },
+  },
+  {
+    id: "sociology",
+    subject: /\bsociology\b/i,
+    general: {
+      style: "Questions on families and education (Paper 1) and crime and deviance and social stratification (Paper 2), some built on short 'Items' (an extract about a study or statistic). 1 mark = terms/multiple choice; 2 marks = a strength or weakness of a method from an Item; 3 marks = describe or identify; 4 marks = explain a point in context; 12 marks = 'Discuss how far sociologists would agree that...' with theories and studies.",
+      marking: "Credit relevant sociological theories, concepts, studies and methods, application to the Item or context, and evaluation with a judgement. 2-mark evaluation: each mark needs analysis plus a judgement. 4-mark items: 1 mark for identifying a point and 3 for explaining it in context (levelled). 12 marks are split equally between knowledge, application and evaluation, with four levels and best fit. If a student gives more responses than asked for, mark all but credit only the best one.",
+    },
+    boards: {
+      AQA: {
+        paper: "AQA GCSE Sociology 8192: Paper 1 'The sociology of families and education' (100 marks, Section A families, Section B education) and Paper 2 'The sociology of crime and deviance and social stratification'.",
+        sources: ["AQA 81921 mark scheme (June 2023)"],
+      },
+    },
+  },
+  {
+    id: "languages",
+    subject: /\b(french|spanish|german|italian|modern foreign|languages?)\b/i,
+    notSubject: /english|latin|greek|computer|programming|mandarin|chinese/i,
+    general: {
+      style: "Reading comprehension of short texts: true/false/not mentioned, positive/negative opinion, multiple choice letters, short answers in English, short answers in the target language, putting words in the right order, and a translation from the target language into English marked in short chunks.",
+      marking: "Comprehension answers earn marks for the key idea(s); two-mark questions need two ideas. Alternative wording with the same meaning is accepted; answers that are too vague or contradict the key idea are not. Extra information is accepted unless it contradicts the key idea. Where a list is asked for, only the first items are marked. Translation is marked chunk by chunk, one mark per chunk, with a wrong tense or a mistranslation that changes the meaning not credited. In target-language answers spelling, gender, pronoun and minor tense errors are tolerated if the meaning is clear.",
+    },
+    boards: {
+      AQA: {
+        paper: "AQA GCSE modern languages (checked on French 8658 Reading Higher): about 60 marks over 12 questions, including opinions, multiple choice, English and target-language answers, word reordering (5 marks) and a French-to-English translation of about 8 chunks. The same four-skill layout (listening, speaking, reading, writing) applies in Spanish and German.",
+        sources: ["AQA 8658RH mark scheme (June 2023)"],
+      },
+    },
+  },
+  {
+    id: "pe",
+    subject: /\b(pe|p\.e\.|physical education|sport science)\b/i,
+    general: {
+      style: "Applied anatomy and physiology, physical training, and socio-cultural issues. Short items (1-4 marks) ask for a definition, an explanation, or a sporting example; 6 marks = an extended answer on a training topic (such as agility and flexibility) and 9 marks = a level-marked answer applying training principles to a sporting scenario.",
+      marking: "Short items: a mark per valid point up to the stated maximum, often a definition plus an example. Examples count only if they fit the sport and the action in the question. A wrong test or term name means no marks for its description. Extended answers: Level 3 accurate, well-detailed and analytical; Level 2 more detail for one part of the question; Level 1 limited, with poorly focused or absent application. Best-fit the level first, then the mark. Credit accurate sporting examples, correct terminology and reasoned judgements; students need not cover every indicative point for full marks.",
+    },
+    boards: {
+      AQA: {
+        paper: "AQA GCSE Physical Education 8582: Paper 1 'The human body and movement in physical activity and sport' (78 marks: 1-9 mark questions, AO1 33, AO2 26, AO3 19) and Paper 2 'Socio-cultural influences and well-being in physical activity and sport'.",
+        sources: ["AQA 85821 mark scheme (June 2023)"],
+      },
+    },
+  },
 ];
 
 const text = (names) => names.map((n) => String(n ?? "")).filter((n) => n.trim()).join(" | ");
