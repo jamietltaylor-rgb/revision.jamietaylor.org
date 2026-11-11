@@ -13,11 +13,16 @@ const req = (url, body) => new Request(url, { method: "POST", headers: { authori
 test("subjects find the right guide", () => {
   assert.equal(findGuide("Business Studies").id, "business");
   assert.equal(findGuide("English Language").id, "english-language");
-  assert.equal(findGuide("English Literature"), null, "literature isn't language");
-  assert.equal(findGuide("Maths").id, "maths");
-  assert.equal(findGuide("Biology").id, "science");
-  assert.equal(findGuide("Computer Science"), null);
-  assert.equal(findGuide("", "Cells and photosynthesis in biology").id, "science", "falls back to the topic");
+    assert.equal(findGuide("Maths").id, "maths");
+  assert.equal(findGuide("Biology").id, "biology");
+  assert.equal(findGuide("Chemistry").id, "chemistry");
+  assert.equal(findGuide("Physics").id, "physics");
+  assert.equal(findGuide("Combined Science").id, "science");
+  assert.equal(findGuide("History").id, "history");
+  assert.equal(findGuide("Geography").id, "geography");
+  assert.equal(findGuide("English Literature").id, "english-literature");
+  assert.equal(findGuide("Computer Science").id, "computer-science", "not the sciences");
+  assert.equal(findGuide("", "Cells and photosynthesis in biology").id, "biology", "falls back to the topic");
   assert.equal(findGuide("French"), null);
 });
 
@@ -34,8 +39,9 @@ test("every guide has style, marking and sources for its boards", () => {
   for (const g of GUIDES) {
     assert.ok(g.general.style.length > 60 && g.general.marking.length > 60, g.id);
     for (const [b, v] of Object.entries(g.boards)) { assert.ok(v.paper && v.sources.length, `${g.id}/${b}`); }
+    assert.ok(g.general.style.length < 900 && g.general.marking.length < 1500, `${g.id} stays short enough for the prompt`);
   }
-  assert.ok(guideSources().length >= 6);
+  assert.ok(guideSources().length >= 10);
 });
 
 test("the question maker and the marker both receive the guide", async () => {

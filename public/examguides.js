@@ -3,6 +3,13 @@
 // and is fed to the question maker (so questions look like the real thing) and to the marker (so it marks the way examiners do).
 // To add a subject: add an entry to GUIDES. `sources` lists the papers it was read from. Boards use the names in logic.js BOARDS.
 
+const SCI = {
+    general: {
+      style: "A mix of multiple choice, one-word and short answers, calculations with units, graph plotting, data interpretation, practical method questions, and a 6-mark extended answer marked in levels. Many questions are set around an unfamiliar situation (a data table, a graph, an experiment) and ask the student to apply what they know.",
+      marking: "Mark schemes list acceptable alternatives. 'Any two from' means each bullet is a separate mark. '/' = alternative wording; 'allow' = also credit; 'ignore' = cannot earn the mark but does no harm; 'do not accept' = a wrong answer that blocks the mark even if the right one is also given. In a list, a right answer plus a wrong answer cancels the mark. Linked marks need a cause and its effect. 6-mark questions: Level 3 (5-6) = relevant points identified, detailed and logically linked into a clear account; Level 2 (3-4) = relevant points with attempts at linking, not fully clear; Level 1 (1-2) = points stated simply with no linking; best-fit the level first, then the mark. A statement that contradicts a correct one stops full marks.",
+    },
+};
+
 export const GUIDES = [
   {
     id: "business",
@@ -49,17 +56,104 @@ export const GUIDES = [
     },
   },
   {
-    id: "science",
-    subject: /\b(biology|chemistry|physics|(combined|triple|applied|natural|environmental|earth|forensic)?\s*science)\b/i,
-    notSubject: /computer|computing|political|social|food/i,
-    general: {
-      style: "A mix of multiple choice, one-word and short answers, calculations with units, graph plotting, data interpretation, practical method questions, and a 6-mark extended answer marked in levels. Many questions are set around an unfamiliar situation (a data table, a graph, an experiment) and ask the student to apply what they know.",
-      marking: "Mark schemes list acceptable alternatives. 'Any two from' means each bullet is a separate mark. '/' = alternative wording; 'allow' = also credit; 'ignore' = cannot earn the mark but does no harm; 'do not accept' = a wrong answer that blocks the mark even if the right one is also given. In a list, a right answer plus a wrong answer cancels the mark. Linked marks need a cause and its effect. 6-mark questions: Level 3 (5-6) = relevant points identified, detailed and logically linked into a clear account; Level 2 (3-4) = relevant points with attempts at linking, not fully clear; Level 1 (1-2) = points stated simply with no linking; best-fit the level first, then the mark. A statement that contradicts a correct one stops full marks.",
-    },
+    id: "biology",
+    subject: /\bbiology\b/i,
+    ...SCI,
     boards: {
       AQA: {
         paper: "AQA GCSE Biology 8461: Paper 1 and Paper 2, 100 marks each (1 h 45), Foundation and Higher. Six questions per paper, each 13-21 marks, each built around one situation (for example plant tissues and medicines, the circulatory system and heart disease, immunity and microbiology, exercise and lactic acid, inheritance, a photosynthesis practical) and mixing multiple choice, naming, calculation, graph plotting, data interpretation, practical method design, evaluation of claims and a 6-mark extended answer.",
         sources: ["AQA 84611H mark scheme (June 2023)"],
+      },
+    },
+  },
+  {
+    id: "chemistry",
+    subject: /\bchemistry\b/i,
+    general: {
+      style: SCI.general.style + " Chemistry adds balanced equations, formulae, calculations (moles, concentrations, yield), dot-and-cross diagrams, and 'method' questions such as making a salt.",
+      marking: SCI.general.marking + " Calculations earn a mark for each correct stage, error carried forward within a part, and a correct answer from wrong working does not get full marks. Give the right formula when asked for one; a name or a symbol can both be creditworthy if they fit. Do not call intermolecular forces covalent bonds. A method question (such as making a salt) is level-marked: Level 3 (5-6) = a method that would work, with the key steps logically sequenced; Level 2 (3-4) = most steps but not fully sequenced; Level 1 (1-2) = some relevant steps with unclear links.",
+    },
+    boards: {
+      AQA: {
+        paper: "AQA GCSE Chemistry 8462: Paper 1 Higher (June 2023) = 10 questions of 8-12 marks, 100 marks, mixing short answers, calculations, graph plotting and drawing, practical evaluation, labelled diagrams and one 6-mark extended answer (a method) plus a 4-mark judgement question (choose a metal and justify with several reasons).",
+        sources: ["AQA 84621H mark scheme (June 2023)"],
+      },
+    },
+  },
+  {
+    id: "physics",
+    subject: /\bphysics\b/i,
+    general: {
+      style: SCI.general.style + " Physics adds equations (state it, substitute, rearrange, answer with a unit), unit conversions (kW to W, cm to m) and standard form.",
+      marking: SCI.general.marking + " Calculations: marks for the equation or substitution, any rearrangement, and the final answer; students can skip steps if a later step is right; error carried forward is allowed; units are expected on the final answer and values must be converted before substituting. 6-mark questions: three levels worth two marks each (5-6, 3-4, 1-2); indicative content is a guide and other valid points earn credit. Explanations need the physical reason (e.g. both are positively charged, so they repel) and not just the observation.",
+    },
+    boards: {
+      AQA: {
+        paper: "AQA GCSE Physics 8463: Paper 1 Higher (June 2023), 100 marks over nine questions mixing short answers, multi-step calculations and two 6-mark extended answers.",
+        sources: ["AQA 84631H mark scheme (June 2023)"],
+      },
+    },
+  },
+  {
+    id: "science",
+    subject: /\b((combined|triple|applied|natural|environmental|earth|forensic)\s+science|science)\b/i,
+    notSubject: /computer|computing|political|social|food/i,
+    ...SCI,
+    boards: {},
+  },
+  {
+    id: "history",
+    subject: /\bhistory\b/i,
+    general: {
+      style: "Source and knowledge questions marked in levels. Typical mark values: 4 marks (e.g. say what two interpretations differ on, or give two problems/consequences, each with support), 8 marks (explain why an interpretation is more convincing, or explain/write about the effects of an event), 12 marks (a 'which was more important' or 'how far do you agree' judgement). Questions name the period and key words to focus on.",
+      marking: "Examiners find the best-fit level, then the mark within it. Higher levels need accurate, detailed own knowledge, a developed explanation of cause, consequence or change, and (for 8- and 12-mark evaluative questions) a sustained judgement that is supported, not just stated. Indicative content is a guide, not a model answer: other valid points are credited. Interpretation questions reward using the content and the provenance (who, when, why) of the interpretations with own knowledge.",
+    },
+    boards: {
+      AQA: {
+        paper: "AQA GCSE History 8145 (one option per paper): Paper 1 Section A (period study) Q1 differences between two interpretations (4 marks), Q2 why the authors' views differ (4), Q3 which interpretation is more convincing (8); Section B Q4 two problems/features (4), Q5 explain the effect of an event (8), Q6 which of two factors saw more important change (12). Marks come from AO1 knowledge, AO2 explanation, AO4 interpretations.",
+        sources: ["AQA 81451AC mark scheme (June 2023)"],
+      },
+    },
+  },
+  {
+    id: "geography",
+    subject: /\bgeograph/i,
+    general: {
+      style: "Short point-marked items (1-2 marks, a point and a developed point) and level-marked questions of 4, 6 and 9 marks. Questions often use a figure, map or data table. Command words: describe = give features or pattern; outline = main points briefly; explain = a reasoned account of how or why; suggest = propose likely causes or effects using the evidence; assess / evaluate / 'to what extent' = weigh evidence and reach a judgement. Named places, case studies and data support answers.",
+      marking: "Point marking: 1 mark for the point and often a second for a developed idea. Level marking (4 marks: L2 3-4, L1 1-2; 6 marks: L3 5-6, L2 3-4, L1 1-2; 9 marks: L3 7-9, L2 4-6, L1 1-3): AO1 knowledge, AO2 understanding of processes and links, AO3 applying evidence from the figures and judging. Examiners find the best-fit level then the mark within it. Answers that ignore the figure, or give no evaluation where one is asked for, are capped at Level 2. Named places and data are credited when relevant to the question. Some 9-mark questions carry 3 extra marks for spelling, punctuation and grammar.",
+    },
+    boards: {
+      AQA: {
+        paper: "AQA GCSE Geography 8035 Paper 1 'Living with the physical environment': sections A, B and C (natural hazards, the living world, physical landscapes in the UK), questions of 1, 2, 4, 6 and 9 marks (9-mark questions include 3 SPaG marks).",
+        sources: ["AQA 80351 mark scheme (June 2023)"],
+      },
+    },
+  },
+  {
+    id: "english-literature",
+    subject: /\bliterature\b/i,
+    general: {
+      style: "Essay questions on a set text. Each starts from a short extract and asks how the writer presents an idea or character, then asks you to write about the extract and the whole text. Marked in six levels: L6 'critical, exploratory'; L5 'thoughtful, developed'; L4 'clear understanding'; L3 'explained, structured comments'; L2 'supported, relevant comments'; L1 'simple, explicit comments'.",
+      marking: "Any valid interpretation is credited; there is no single set of points. Credit specific references (short quotations), apt subject terminology, explored effects of the writer's methods, and links between the text, its context and the task. Weighting on a 30-mark question: AO1 (response and quotations) 12, AO2 (language, form, structure) 12, AO3 (context) 6; Shakespeare adds 4 marks for spelling, punctuation and grammar. A response that ignores the extract or the whole text is capped near the top of Level 2.",
+    },
+    boards: {
+      AQA: {
+        paper: "AQA GCSE English Literature 8702 Paper 1 'Shakespeare and the 19th-century novel': Section A Shakespeare 30 + 4 SPaG marks, Section B the novel 30 marks; wording like 'Starting with this extract, explore how... Write about how... in this extract and in the play as a whole'. Level bands out of 30: L6 26-30, L5 21-25, L4 16-20, L3 11-15, L2 6-10, L1 1-5.",
+        sources: ["AQA 87021 mark scheme (June 2023)"],
+      },
+    },
+  },
+  {
+    id: "computer-science",
+    subject: /\b(computer science|computing)\b/i,
+    general: {
+      style: "Mostly short point-marked questions (state, describe, give, convert, complete), binary and hexadecimal conversion, binary addition and shifts, labelling, and an 8-mark extended 'discuss' question on an issue such as ethics, environment, legal or cultural impact, with benefits and drawbacks for different groups.",
+      marking: "Point marking: 1 mark per valid point up to a stated maximum. 'Accept' lists valid alternatives; 'do not accept' earns nothing; a named product on its own is not accepted when a description is asked for. Two answers to a single-answer question, or contradictory answers, earn no mark. Binary and shift questions are marked on the final answer and the working shown. The 8-mark discuss question is level-marked: low (1-2), middle (3-5), high (6-8); credit knowledge, application to the scenario, balance of benefits and drawbacks, and a structured, evaluative response.",
+    },
+    boards: {
+      OCR: {
+        paper: "OCR GCSE Computer Science J277 Paper 1 'Computer systems', about 80 marks over six questions with lettered parts (hardware, memory and storage, networks, security, software, ethics and the impacts of technology); Paper 2 covers computational thinking, algorithms and programming.",
+        sources: ["OCR J277/01 mark scheme (June 2025)"],
       },
     },
   },
