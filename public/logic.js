@@ -926,6 +926,29 @@ export const LEVELS = ["Primary school", "Years 7–9 (KS3)", "GCSE", "A-level",
 export const STYLES = { typed: "typed answers", choice: "multiple choice", gapfill: "gap fill", mixed: "a mix of typed and multiple choice" };
 
 /** The text people copy into another AI (ChatGPT, Gemini…) to get questions this app can read. */
+// "I don't know my exam board": a short quiz of clues that differ between the boards. Each answer adds points to the boards it points to.
+// Paper names and code styles are taken from the boards' own published papers; where you live also counts a little.
+const BQ = (...pairs) => Object.fromEntries(pairs);
+export const BOARD_QUIZ = [
+  { id: "place", q: "Where is your school?", options: [["England", {}], ["Wales", BQ(["WJEC / Eduqas", 3])], ["Northern Ireland", BQ(["CCEA", 4])], ["Scotland", BQ(["SQA", 4])], ["Not sure", {}]] },
+  { id: "logo", q: "Is an exam board's name or logo on anything you have, like a past paper, your exam timetable, a textbook cover or your teacher's slides?", options: [["AQA", BQ(["AQA", 7])], ["Pearson / Edexcel", BQ(["Edexcel", 7])], ["OCR", BQ(["OCR", 7])], ["WJEC or Eduqas", BQ(["WJEC / Eduqas", 7])], ["CCEA", BQ(["CCEA", 7])], ["SQA", BQ(["SQA", 7])], ["I can't see one", {}]] },
+  { id: "code", q: "Look at a subject code on a paper or your entry list. What does it look like?", options: [["A 4-digit number starting with 8 (like 8300)", BQ(["AQA", 4])], ["A number, two letters, then a number (like 1MA1 or 1BI0)", BQ(["Edexcel", 4])], ["A J then 3 digits (like J560)", BQ(["OCR", 4])], ["A C then digits (like C300U10)", BQ(["WJEC / Eduqas", 3])], ["A G then digits", BQ(["CCEA", 3])], ["I can't find one", {}]] },
+  { id: "englang", q: "If you take English Language, what is Paper 1 (or Component 1) called?", options: [["Explorations in creative reading and writing", BQ(["AQA", 4])], ["Fiction and imaginative writing", BQ(["Edexcel", 4])], ["Communicating information and ideas", BQ(["OCR", 4])], ["20th Century Literature Reading and Creative Prose Writing", BQ(["WJEC / Eduqas", 4])], ["I don't know or don't take it", {}]] },
+  { id: "englit", q: "If you take English Literature, what is the first paper called?", options: [["Shakespeare and the 19th-century novel", BQ(["AQA", 4])], ["Shakespeare and post-1914 literature", BQ(["Edexcel", 4])], ["Exploring modern and literary heritage texts", BQ(["OCR", 4])], ["Shakespeare and Poetry", BQ(["WJEC / Eduqas", 4])], ["I don't know or don't take it", {}]] },
+];
+/** answers: { questionId: optionIndex }. Returns the boards ranked by points, and how sure the guess is. */
+export function scoreBoardQuiz(answers = {}) {
+  const points = {};
+  for (const q of BOARD_QUIZ) {
+    const pick = q.options[answers[q.id]];
+    if (pick) for (const [b, n] of Object.entries(pick[1])) points[b] = (points[b] || 0) + n;
+  }
+  const ranked = Object.entries(points).filter(([, n]) => n > 0).sort((a, b) => b[1] - a[1] || BOARDS.indexOf(a[0]) - BOARDS.indexOf(b[0])).map(([board, score]) => ({ board, score }));
+  if (!ranked.length) return { best: null, ranked, sure: "none" };
+  const gap = ranked[0].score - (ranked[1] ? ranked[1].score : 0);
+  return { best: ranked[0].board, ranked, sure: ranked[0].score >= 7 && gap >= 3 ? "high" : gap >= 3 ? "medium" : "low" };
+}
+
 export const BOARDS = ["Any exam board", "AQA", "Edexcel", "OCR", "WJEC / Eduqas", "CCEA", "SQA"];
 
 export function buildAiPrompt({ topic, level = "GCSE", count = 15, style = "gapfill", styles, paper = false, board = "", mode = "quick", kinds, subject = "" } = {}) {

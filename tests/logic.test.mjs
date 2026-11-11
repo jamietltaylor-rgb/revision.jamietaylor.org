@@ -740,3 +740,16 @@ test("the pasted prompt can ask for a mix of styles", () => {
   const p = L.buildAiPrompt({ topic: "Cells", styles: ["typed", "gapfill"] });
   assert.match(p, /mix of these kinds/); assert.match(p, /gap fill/); assert.doesNotMatch(p, /Give 3 wrong options for every question/);
 });
+
+test("the exam board quiz points to the right board", () => {
+  const pick = (id, text) => L.BOARD_QUIZ.find((q) => q.id === id).options.findIndex(([label]) => label.startsWith(text));
+  const a = L.scoreBoardQuiz({ code: pick("code", "A J then"), englang: pick("englang", "Communicating") });
+  assert.equal(a.best, "OCR"); assert.equal(a.sure, "high");
+  const w = L.scoreBoardQuiz({ place: pick("place", "Wales") });
+  assert.equal(w.best, "WJEC / Eduqas"); assert.equal(w.sure, "medium");
+  const none = L.scoreBoardQuiz({ place: pick("place", "England"), logo: pick("logo", "I can't") });
+  assert.equal(none.best, null);
+  const mixed = L.scoreBoardQuiz({ logo: pick("logo", "AQA"), englit: pick("englit", "Shakespeare and post-1914") });
+  assert.equal(mixed.best, "AQA");
+  for (const q of L.BOARD_QUIZ) for (const [, pts] of q.options) for (const b of Object.keys(pts)) assert.ok(L.BOARDS.includes(b), b);
+});

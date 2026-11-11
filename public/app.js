@@ -1294,6 +1294,50 @@ function deleteQuestion(id) {
   save();
   render();
 }
+/** "I don't know my exam board": a short quiz that guesses the most likely board. onPick(board) is called if they choose to use it. */
+function openBoardQuiz(onPick) {
+  const previous = document.activeElement;
+  let box, step = 0; const answers = {};
+  const close = () => { document.removeEventListener?.("keydown", onKey, true); box.remove(); try { previous && previous.focus && previous.focus(); } catch { /* ignore */ } };
+  const onKey = (e) => { if (e.key === "Escape") { e.preventDefault(); close(); } };
+  const body = () => {
+    if (step < L.BOARD_QUIZ.length) {
+      const q = L.BOARD_QUIZ[step];
+      return [
+        h("p", { class: "small muted", style: "margin:0 0 .3rem" }, `Question ${step + 1} of ${L.BOARD_QUIZ.length}`),
+        h("h2", { id: "bq-title", style: "font-size:1.05rem" }, q.q),
+        h("div", { style: "display:grid;gap:.4rem;margin-top:.7rem" }, q.options.map(([label], i) => h("button", { type: "button", class: answers[q.id] === i ? "primary" : "", style: "text-align:left", onclick: () => { answers[q.id] = i; step += 1; draw(); } }, label))),
+        h("div", { class: "row", style: "justify-content:space-between;margin-top:.8rem" },
+          h("button", { type: "button", class: "ghost small", disabled: step === 0, onclick: () => { step -= 1; draw(); } }, "← Back"),
+          h("button", { type: "button", class: "ghost small", onclick: close }, "Cancel")),
+      ];
+    }
+    const r = L.scoreBoardQuiz(answers);
+    if (!r.best) return [
+      h("h2", { id: "bq-title", style: "font-size:1.05rem" }, "I can't tell from that"),
+      h("p", {}, "None of your answers pointed to a board. The quickest way to find out is the front page of any past paper, your exam timetable, or asking your teacher. Until then, “Any exam board” works fine."),
+      h("div", { class: "row", style: "justify-content:flex-end;margin-top:1rem;gap:.4rem" }, h("button", { type: "button", onclick: () => { step = 0; draw(); } }, "Start again"), h("button", { type: "button", class: "primary", onclick: close }, "Close")),
+    ];
+    const second = r.ranked[1];
+    return [
+      h("p", { class: "small muted", style: "margin:0 0 .3rem" }, r.sure === "high" ? "Pretty sure" : r.sure === "medium" ? "Best guess" : "Not very sure"),
+      h("h2", { id: "bq-title", style: "font-size:1.15rem" }, `Most likely: ${r.best}`),
+      second && r.sure !== "high" && h("p", {}, `Next most likely: ${second.board}.`),
+      h("p", { class: "small", style: "margin-top:.5rem" }, "This is only a guess from the clues you gave. Check with your teacher, or look at the front of a past paper, before relying on it."),
+      h("div", { class: "row", style: "justify-content:flex-end;margin-top:1rem;gap:.4rem;flex-wrap:wrap" },
+        h("button", { type: "button", onclick: () => { step = 0; draw(); } }, "Start again"),
+        h("button", { type: "button", onclick: close }, "Not now"),
+        h("button", { type: "button", class: "primary", onclick: () => { onPick(r.best); close(); } }, `Use ${r.best}`)),
+    ];
+  };
+  const card = h("div", { class: "modal", role: "dialog", "aria-modal": "true", "aria-labelledby": "bq-title" });
+  const draw = () => { card.replaceChildren(...body().filter(Boolean)); };
+  box = h("div", { class: "modal-back", onclick: (e) => { if (e.target === box) close(); } }, card);
+  draw();
+  document.body.append(box);
+  document.addEventListener?.("keydown", onKey, true);
+}
+
 /** An in-app "are you sure?" box (instead of the browser's pop-up). Resolves true if confirmed. */
 function askConfirm({ title, message, confirmLabel = "Yes", danger = true }) {
   return new Promise((resolve) => {
@@ -1411,6 +1455,7 @@ function viewQuestions() {
         L.isBusinessSubject(chosenSubjectName(), draft.topic) && h("p", { class: "small muted", style: "margin:.25rem 0 0" }, "The “Outline one”, “Analyse” and “Justify” questions are set around a made-up business with a short case-study extract, like the Edexcel papers."),
         f.figures.length > 0 && h("p", { class: "small muted", style: "margin:.25rem 0 0" }, `Some questions may also come with a ${f.figures.map((x) => (x === "table" ? "table" : x + " chart")).join(", ").replace(/line chart/, "line graph").replace(/scatter chart/, "scatter graph")}.`));
     })(),
+    h("p", { class: "small", style: "margin:0 0 .5rem" }, h("button", { type: "button", class: "ghost small", onclick: () => openBoardQuiz((b) => { draft.board = b; state.settings.board = b; save(); render(); toast(`Exam board set to ${b}.`); }) }, "🤔 I don't know my exam board")),
     h("p", { class: "small muted", style: "margin:0 0 .4rem" }, draft.board !== "Any exam board" ? `Questions will follow the ${draft.board} specification. Your board is remembered.` : "Pick your exam board and the questions will follow its specification. It's remembered for next time."),
     h("label", { class: "row", style: "gap:.6rem;font-weight:600;margin:.3rem 0 .4rem" },
       h("input", { type: "checkbox", style: "width:auto;min-height:0;margin:0", checked: draft.paper, onchange: (e) => { draft.paper = e.target.checked; render(); } }),
