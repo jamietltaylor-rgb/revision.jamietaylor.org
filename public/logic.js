@@ -926,20 +926,40 @@ export const LEVELS = ["Primary school", "Years 7–9 (KS3)", "GCSE", "A-level",
 export const STYLES = { typed: "typed answers", choice: "multiple choice", gapfill: "gap fill", mixed: "a mix of typed and multiple choice" };
 
 /** The text people copy into another AI (ChatGPT, Gemini…) to get questions this app can read. */
-// "I don't know my exam board": a short quiz of clues that differ between the boards. Each answer adds points to the boards it points to.
-// Paper names and code styles are taken from the boards' own published papers; where you live also counts a little.
+// "I don't know my exam board": a short quiz of clues that differ between the boards, asked per subject (a school can use a
+// different board for each subject). Each answer adds points to the boards it points to. Paper names and code styles come
+// from the boards' own published papers and specifications; where you live also counts a little.
 const BQ = (...pairs) => Object.fromEntries(pairs);
-export const BOARD_QUIZ = [
+const PAPER_NAME_NONE = ["I don't know or can't find it", {}];
+const GENERIC_BOARD_QUESTIONS = [
   { id: "place", q: "Where is your school?", options: [["England", {}], ["Wales", BQ(["WJEC / Eduqas", 3])], ["Northern Ireland", BQ(["CCEA", 4])], ["Scotland", BQ(["SQA", 4])], ["Not sure", {}]] },
-  { id: "logo", q: "Is an exam board's name or logo on anything you have, like a past paper, your exam timetable, a textbook cover or your teacher's slides?", options: [["AQA", BQ(["AQA", 7])], ["Pearson / Edexcel", BQ(["Edexcel", 7])], ["OCR", BQ(["OCR", 7])], ["WJEC or Eduqas", BQ(["WJEC / Eduqas", 7])], ["CCEA", BQ(["CCEA", 7])], ["SQA", BQ(["SQA", 7])], ["I can't see one", {}]] },
-  { id: "code", q: "Look at a subject code on a paper or your entry list. What does it look like?", options: [["A 4-digit number starting with 8 (like 8300)", BQ(["AQA", 4])], ["A number, two letters, then a number (like 1MA1 or 1BI0)", BQ(["Edexcel", 4])], ["A J then 3 digits (like J560)", BQ(["OCR", 4])], ["A C then digits (like C300U10)", BQ(["WJEC / Eduqas", 3])], ["A G then digits", BQ(["CCEA", 3])], ["I can't find one", {}]] },
-  { id: "englang", q: "If you take English Language, what is Paper 1 (or Component 1) called?", options: [["Explorations in creative reading and writing", BQ(["AQA", 4])], ["Fiction and imaginative writing", BQ(["Edexcel", 4])], ["Communicating information and ideas", BQ(["OCR", 4])], ["20th Century Literature Reading and Creative Prose Writing", BQ(["WJEC / Eduqas", 4])], ["I don't know or don't take it", {}]] },
-  { id: "englit", q: "If you take English Literature, what is the first paper called?", options: [["Shakespeare and the 19th-century novel", BQ(["AQA", 4])], ["Shakespeare and post-1914 literature", BQ(["Edexcel", 4])], ["Exploring modern and literary heritage texts", BQ(["OCR", 4])], ["Shakespeare and Poetry", BQ(["WJEC / Eduqas", 4])], ["I don't know or don't take it", {}]] },
+  { id: "logo", q: "Is an exam board's name or logo on anything you have for {subject}, like a past paper, your exam timetable, a textbook cover or your teacher's slides?", options: [["AQA", BQ(["AQA", 7])], ["Pearson / Edexcel", BQ(["Edexcel", 7])], ["OCR", BQ(["OCR", 7])], ["WJEC or Eduqas", BQ(["WJEC / Eduqas", 7])], ["CCEA", BQ(["CCEA", 7])], ["SQA", BQ(["SQA", 7])], ["I can't see one", {}]] },
+  { id: "code", q: "Look at the {subject} code on a paper or your entry list. What does it look like?", options: [["A 4-digit number starting with 8 (like 8300)", BQ(["AQA", 4])], ["A number, two letters, then a number (like 1MA1 or 1BI0)", BQ(["Edexcel", 4])], ["A J then 3 digits (like J560)", BQ(["OCR", 4])], ["A C then digits (like C300U10)", BQ(["WJEC / Eduqas", 3])], ["A G then digits", BQ(["CCEA", 3])], ["I can't find one", {}]] },
 ];
+const sciencePaper = (subject, aqa, edexcel, gateway) => ({ id: "paper", q: `What is in your ${subject} Paper 1 (or what is the course called)?`, options: [[aqa, BQ(["AQA", 4])], [edexcel, BQ(["Edexcel", 4])], [gateway, BQ(["OCR", 4])], [`The course or paper is called "Concepts in ${subject}"`, BQ(["WJEC / Eduqas", 4])], PAPER_NAME_NONE] });
+/** Extra clues that only work for one subject. Keyed by the subject's guide id (see examguides.js). */
+export const SUBJECT_CLUES = {
+  "english-language": [{ id: "paper", q: "What is English Language Paper 1 (or Component 1) called?", options: [["Explorations in creative reading and writing", BQ(["AQA", 4])], ["Fiction and imaginative writing", BQ(["Edexcel", 4])], ["Communicating information and ideas", BQ(["OCR", 4])], ["20th Century Literature Reading and Creative Prose Writing", BQ(["WJEC / Eduqas", 4])], PAPER_NAME_NONE] }],
+  "english-literature": [{ id: "paper", q: "What is the first English Literature paper called?", options: [["Shakespeare and the 19th-century novel", BQ(["AQA", 4])], ["Shakespeare and post-1914 literature", BQ(["Edexcel", 4])], ["Exploring modern and literary heritage texts", BQ(["OCR", 4])], ["Shakespeare and Poetry", BQ(["WJEC / Eduqas", 4])], PAPER_NAME_NONE] }],
+  maths: [
+    { id: "paper", q: "How are your Maths papers named?", options: [["Paper 1, Paper 2 and Paper 3", BQ(["AQA", 1], ["Edexcel", 1], ["OCR", 1])], ["Component 1 and Component 2", BQ(["WJEC / Eduqas", 5])], ["Units, such as M3 or M7", BQ(["CCEA", 5])], PAPER_NAME_NONE] },
+    { id: "marks", q: "How many marks is each Maths paper out of?", options: [["80", BQ(["AQA", 2], ["Edexcel", 2])], ["100", BQ(["OCR", 4])], ["I don't know", {}]] },
+  ],
+  biology: [sciencePaper("Biology", "Cell biology; Organisation; Infection and response; Bioenergetics", "Key concepts in biology; Cells and control; Genetics; Health, disease and medicines", 'The course is called "Gateway Science" (paper J247/01)')],
+  chemistry: [sciencePaper("Chemistry", "Atomic structure and the periodic table; Bonding; Quantitative chemistry; Chemical changes; Energy changes", "Key concepts in chemistry; States of matter and mixtures; Chemical changes; Extracting metals and equilibria", 'The course is called "Gateway Science" (paper J248/01)')],
+  physics: [sciencePaper("Physics", "Energy; Electricity; Particle model of matter; Atomic structure", "Key concepts of physics; Motion and forces; Conservation of energy; Waves; Light and the EM spectrum; Radioactivity", 'The course is called "Gateway Science" (paper J249/01)')],
+  business: [{ id: "paper", q: "What is Business Paper 1 (or Component 1) called, or what is its first theme?", options: [["Influences of operations and HRM on business activity", BQ(["AQA", 4])], ["Theme 1: Investigating small business", BQ(["Edexcel", 4])], ["Business 1: Business activity, marketing and people", BQ(["OCR", 4])], ["Business Dynamics", BQ(["WJEC / Eduqas", 4])], PAPER_NAME_NONE] }],
+  "computer-science": [{ id: "paper", q: "What is Computer Science Paper 1 called?", options: [["Computational thinking and problem solving", BQ(["AQA", 4])], ["Principles of computer science", BQ(["Edexcel", 4])], ["Computer systems", BQ(["OCR", 4])], ["Understanding Computer Science", BQ(["WJEC / Eduqas", 4])], PAPER_NAME_NONE] }],
+};
+/** The quiz for one subject (a guide id such as "biology", or null when we don't know the subject): the general clues plus that subject's own. */
+export function boardQuizFor(guideId, subjectName = "this subject") {
+  const subject = String(subjectName || "this subject");
+  return [...GENERIC_BOARD_QUESTIONS, ...(SUBJECT_CLUES[guideId] || [])].map((q) => ({ ...q, q: q.q.replace("{subject}", subject) }));
+}
 /** answers: { questionId: optionIndex }. Returns the boards ranked by points, and how sure the guess is. */
-export function scoreBoardQuiz(answers = {}) {
+export function scoreBoardQuiz(answers = {}, guideId = null) {
   const points = {};
-  for (const q of BOARD_QUIZ) {
+  for (const q of boardQuizFor(guideId)) {
     const pick = q.options[answers[q.id]];
     if (pick) for (const [b, n] of Object.entries(pick[1])) points[b] = (points[b] || 0) + n;
   }
@@ -947,6 +967,11 @@ export function scoreBoardQuiz(answers = {}) {
   if (!ranked.length) return { best: null, ranked, sure: "none" };
   const gap = ranked[0].score - (ranked[1] ? ranked[1].score : 0);
   return { best: ranked[0].board, ranked, sure: ranked[0].score >= 7 && gap >= 3 ? "high" : gap >= 3 ? "medium" : "low" };
+}
+/** The exam board for a subject: its own if set (a school can use a different board for each subject), otherwise the general one. */
+export function boardForSubject(settings, subjectId) {
+  const own = settings && settings.subjectBoards && subjectId ? settings.subjectBoards[subjectId] : "";
+  return BOARDS.includes(own) && own !== "Any exam board" ? own : (settings && BOARDS.includes(settings.board) && settings.board !== "Any exam board" ? settings.board : "");
 }
 
 export const BOARDS = ["Any exam board", "AQA", "Edexcel", "OCR", "WJEC / Eduqas", "CCEA", "SQA"];
@@ -1138,7 +1163,7 @@ export function emptyState() {
     questions: [],
     treats: [],
     redeemed: [],
-    settings: { dailyGoal: DEFAULT_GOAL, board: "" },
+    settings: { dailyGoal: DEFAULT_GOAL, board: "", subjectBoards: {} },
     buddy: { name: "Pip" },
     chests: 0,
     lastParade: "",
@@ -1228,6 +1253,10 @@ export function sanitiseState(raw, catalogueIds = null) {
     }
   }
   out.settings.board = raw.settings && BOARDS.includes(raw.settings.board) && raw.settings.board !== "Any exam board" ? raw.settings.board : "";
+  out.settings.subjectBoards = {};
+  if (raw.settings && raw.settings.subjectBoards && typeof raw.settings.subjectBoards === "object") {
+    for (const [k, v] of Object.entries(raw.settings.subjectBoards).slice(0, 100)) if (typeof k === "string" && k.length <= 60 && BOARDS.includes(v) && v !== "Any exam board") out.settings.subjectBoards[k] = v;
+  }
   out.settings.dailyGoal = Math.round(num(raw.settings && raw.settings.dailyGoal, MIN_GOAL, 200, DEFAULT_GOAL));
   out.buddy.name = str(raw.buddy && raw.buddy.name, 20) || "Pip";
   out.chests = Math.round(num(raw.chests, 0, 1000, 0));

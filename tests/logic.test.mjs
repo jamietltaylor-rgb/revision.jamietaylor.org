@@ -741,15 +741,30 @@ test("the pasted prompt can ask for a mix of styles", () => {
   assert.match(p, /mix of these kinds/); assert.match(p, /gap fill/); assert.doesNotMatch(p, /Give 3 wrong options for every question/);
 });
 
-test("the exam board quiz points to the right board", () => {
-  const pick = (id, text) => L.BOARD_QUIZ.find((q) => q.id === id).options.findIndex(([label]) => label.startsWith(text));
-  const a = L.scoreBoardQuiz({ code: pick("code", "A J then"), englang: pick("englang", "Communicating") });
+test("the exam board quiz is asked per subject and points to the right board", () => {
+  const find = (qs, id, text) => qs.find((q) => q.id === id).options.findIndex(([label]) => label.startsWith(text));
+  const eng = L.boardQuizFor("english-language", "English Language");
+  assert.ok(eng.some((q) => q.id === "paper") && /English Language/.test(eng.find((q) => q.id === "logo").q), "has a subject clue and names the subject");
+  assert.ok(!L.boardQuizFor("geography", "Geography").some((q) => q.id === "paper"), "a subject with no clues only gets the general questions");
+  const a = L.scoreBoardQuiz({ code: find(eng, "code", "A J then"), paper: find(eng, "paper", "Communicating") }, "english-language");
   assert.equal(a.best, "OCR"); assert.equal(a.sure, "high");
-  const w = L.scoreBoardQuiz({ place: pick("place", "Wales") });
-  assert.equal(w.best, "WJEC / Eduqas"); assert.equal(w.sure, "medium");
-  const none = L.scoreBoardQuiz({ place: pick("place", "England"), logo: pick("logo", "I can't") });
-  assert.equal(none.best, null);
-  const mixed = L.scoreBoardQuiz({ logo: pick("logo", "AQA"), englit: pick("englit", "Shakespeare and post-1914") });
-  assert.equal(mixed.best, "AQA");
-  for (const q of L.BOARD_QUIZ) for (const [, pts] of q.options) for (const b of Object.keys(pts)) assert.ok(L.BOARDS.includes(b), b);
+  // the same clue means different things in different subjects
+  const bio = L.boardQuizFor("biology", "Biology");
+  assert.equal(L.scoreBoardQuiz({ paper: find(bio, "paper", "Cell biology") }, "biology").best, "AQA");
+  assert.equal(L.scoreBoardQuiz({ paper: find(bio, "paper", "Cell biology") }, "geography").best, null, "a Biology answer does not count in another subject");
+  const maths = L.boardQuizFor("maths", "Maths");
+  assert.equal(L.scoreBoardQuiz({ paper: find(maths, "paper", "Component"), marks: find(maths, "marks", "80") }, "maths").best, "WJEC / Eduqas");
+  assert.equal(L.scoreBoardQuiz({ place: find(eng, "place", "Wales") }, null).best, "WJEC / Eduqas");
+  assert.equal(L.scoreBoardQuiz({ place: find(eng, "place", "England"), logo: find(eng, "logo", "I can't") }, null).best, null);
+  for (const id of Object.keys(L.SUBJECT_CLUES)) for (const q of L.boardQuizFor(id)) for (const [, pts] of q.options) for (const b of Object.keys(pts)) assert.ok(L.BOARDS.includes(b), b);
+});
+
+test("each subject can have its own exam board, with the general one as the fallback", () => {
+  const s = { board: "OCR", subjectBoards: { bio: "AQA", junk: "Nope" } };
+  assert.equal(L.boardForSubject(s, "bio"), "AQA");
+  assert.equal(L.boardForSubject(s, "maths"), "OCR");
+  assert.equal(L.boardForSubject(s, "junk"), "OCR");
+  assert.equal(L.boardForSubject({ board: "", subjectBoards: {} }, "x"), "");
+  const clean = L.sanitiseState({ subjects: [], settings: { board: "AQA", subjectBoards: { a: "Edexcel", b: "Any exam board", c: "Nope" } } });
+  assert.deepEqual(clean.settings.subjectBoards, { a: "Edexcel" });
 });

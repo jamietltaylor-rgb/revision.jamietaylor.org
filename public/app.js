@@ -1,6 +1,7 @@
 import * as L from "./logic.js";
 import * as Shop from "./shop.js";
 import { CONFIG } from "./config.js";
+import { findGuide } from "./examguides.js";
 import { createCloud, displayName } from "./cloud.js";
 
 const LOCAL_KEY = "revise-app-v1"; // used when logins aren't switched on, and for progress made before accounts existed
@@ -369,7 +370,7 @@ function makeQuestionsFor(name, kind, board) {
   draft.level = kind === "A-level" || kind === "AS-level" ? "A-level" : "GCSE";
   draft.paper = true;
   draft.boardInit = true;
-  draft.board = board && L.BOARDS.includes(board) ? board : (state.settings.board || "Any exam board");
+  draft.board = board && L.BOARDS.includes(board) ? board : (L.boardForSubject(state.settings, sub && sub.id) || "Any exam board");
   draft.preview = null;
   draft.subjectId = sub ? sub.id : "__new";
   if (!sub) draft.newSubject = name;
@@ -1008,7 +1009,7 @@ async function submitExam(written) {
   let result;
   try {
     if (!cloud.signedIn) throw new Error("local");
-    result = { ...(await cloud.markAnswer({ q: q.q, a: q.a, marks: q.marks, answer: given, kind: L.examKindOf(q), subject: ((state.subjects.find((s) => s.id === q.subjectId) || {}).name) || "", board: state.settings.board || "", ...(q.ctx ? { ctx: q.ctx } : {}) })), source: "ai" };
+    result = { ...(await cloud.markAnswer({ q: q.q, a: q.a, marks: q.marks, answer: given, kind: L.examKindOf(q), subject: ((state.subjects.find((s) => s.id === q.subjectId) || {}).name) || "", board: L.boardForSubject(state.settings, q.subjectId), ...(q.ctx ? { ctx: q.ctx } : {}) })), source: "ai" };
   } catch {
     result = { ...L.markLocally(given, q.a, q.marks, L.examKindOf(q)), feedback: "", source: "local" };
   }
@@ -1294,17 +1295,37 @@ function deleteQuestion(id) {
   save();
   render();
 }
-/** "I don't know my exam board": a short quiz that guesses the most likely board. onPick(board) is called if they choose to use it. */
-function openBoardQuiz(onPick) {
+/** Remember an exam board for one subject (a school can use a different board for each). With no real subject yet, it is the general default. */
+function setBoardFor(subjectId, board) {
+  const b = board === "Any exam board" ? "" : board;
+  if (subjectId && subjectId !== "__new") {
+    state.settings.subjectBoards = state.settings.subjectBoards || {};
+    if (b) state.settings.subjectBoards[subjectId] = b; else delete state.settings.subjectBoards[subjectId];
+  } else state.settings.board = b;
+}
+/** "I don't know my exam board": a short quiz, for one subject, that guesses the most likely board. onPick(board, subjectId) is called if they choose to use it. */
+function openBoardQuiz(startSubjectId, onPick) {
   const previous = document.activeElement;
-  let box, step = 0; const answers = {};
+  const subjects = [...state.subjects, ...(startSubjectId === "__new" && draft.newSubject.trim() ? [{ id: "__new", name: draft.newSubject.trim() }] : [])];
+  let subjectId = subjects.some((s) => s.id === startSubjectId) ? startSubjectId : (subjects[0] ? subjects[0].id : "");
+  let box, step = 0; let answers = {};
+  const subj = () => subjects.find((s) => s.id === subjectId);
+  const cleanName = () => ((subj() || {}).name || "").replace(/ – Exam questions$/, "").replace(/^Example: /, "").replace(/\s*\(delete me\)$/i, "").trim();
+  const guideId = () => { const g = findGuide(cleanName()); return g ? g.id : null; };
+  const questions = () => L.boardQuizFor(guideId(), cleanName() || "this subject");
   const close = () => { document.removeEventListener?.("keydown", onKey, true); box.remove(); try { previous && previous.focus && previous.focus(); } catch { /* ignore */ } };
   const onKey = (e) => { if (e.key === "Escape") { e.preventDefault(); close(); } };
+  const restart = () => { step = 0; answers = {}; draw(); };
+  const picker = () => subjects.length > 1 ? h("label", { class: "small", style: "display:block;margin:0 0 .6rem" }, "Subject",
+    h("select", { "aria-label": "Subject for the exam board quiz", onchange: (e) => { subjectId = e.target.value; restart(); } }, subjects.map((s) => h("option", { value: s.id, selected: s.id === subjectId }, s.name.replace(/^Example: /, "").replace(/\s*\(delete me\)$/i, ""))))) : null;
   const body = () => {
-    if (step < L.BOARD_QUIZ.length) {
-      const q = L.BOARD_QUIZ[step];
+    const qs = questions();
+    const name = cleanName() || "this subject";
+    if (step < qs.length) {
+      const q = qs[step];
       return [
-        h("p", { class: "small muted", style: "margin:0 0 .3rem" }, `Question ${step + 1} of ${L.BOARD_QUIZ.length}`),
+        picker(),
+        h("p", { class: "small muted", style: "margin:0 0 .3rem" }, `${name} · question ${step + 1} of ${qs.length}`),
         h("h2", { id: "bq-title", style: "font-size:1.05rem" }, q.q),
         h("div", { style: "display:grid;gap:.4rem;margin-top:.7rem" }, q.options.map(([label], i) => h("button", { type: "button", class: answers[q.id] === i ? "primary" : "", style: "text-align:left", onclick: () => { answers[q.id] = i; step += 1; draw(); } }, label))),
         h("div", { class: "row", style: "justify-content:space-between;margin-top:.8rem" },
@@ -1312,22 +1333,22 @@ function openBoardQuiz(onPick) {
           h("button", { type: "button", class: "ghost small", onclick: close }, "Cancel")),
       ];
     }
-    const r = L.scoreBoardQuiz(answers);
+    const r = L.scoreBoardQuiz(answers, guideId());
     if (!r.best) return [
-      h("h2", { id: "bq-title", style: "font-size:1.05rem" }, "I can't tell from that"),
-      h("p", {}, "None of your answers pointed to a board. The quickest way to find out is the front page of any past paper, your exam timetable, or asking your teacher. Until then, “Any exam board” works fine."),
-      h("div", { class: "row", style: "justify-content:flex-end;margin-top:1rem;gap:.4rem" }, h("button", { type: "button", onclick: () => { step = 0; draw(); } }, "Start again"), h("button", { type: "button", class: "primary", onclick: close }, "Close")),
+      h("h2", { id: "bq-title", style: "font-size:1.05rem" }, `I can't tell for ${name} from that`),
+      h("p", {}, "None of your answers pointed to a board. The quickest way to find out is the front page of a past paper for this subject, your exam timetable, or asking your teacher. Until then, “Any exam board” works fine."),
+      h("div", { class: "row", style: "justify-content:flex-end;margin-top:1rem;gap:.4rem" }, h("button", { type: "button", onclick: restart }, "Start again"), h("button", { type: "button", class: "primary", onclick: close }, "Close")),
     ];
     const second = r.ranked[1];
     return [
-      h("p", { class: "small muted", style: "margin:0 0 .3rem" }, r.sure === "high" ? "Pretty sure" : r.sure === "medium" ? "Best guess" : "Not very sure"),
+      h("p", { class: "small muted", style: "margin:0 0 .3rem" }, `${name} · ${r.sure === "high" ? "Pretty sure" : r.sure === "medium" ? "Best guess" : "Not very sure"}`),
       h("h2", { id: "bq-title", style: "font-size:1.15rem" }, `Most likely: ${r.best}`),
       second && r.sure !== "high" && h("p", {}, `Next most likely: ${second.board}.`),
-      h("p", { class: "small", style: "margin-top:.5rem" }, "This is only a guess from the clues you gave. Check with your teacher, or look at the front of a past paper, before relying on it."),
+      h("p", { class: "small", style: "margin-top:.5rem" }, "This is only a guess from the clues you gave, and it only covers this subject. Check with your teacher, or look at the front of a past paper, before relying on it."),
       h("div", { class: "row", style: "justify-content:flex-end;margin-top:1rem;gap:.4rem;flex-wrap:wrap" },
-        h("button", { type: "button", onclick: () => { step = 0; draw(); } }, "Start again"),
+        h("button", { type: "button", onclick: restart }, "Start again"),
         h("button", { type: "button", onclick: close }, "Not now"),
-        h("button", { type: "button", class: "primary", onclick: () => { onPick(r.best); close(); } }, `Use ${r.best}`)),
+        h("button", { type: "button", class: "primary", onclick: () => { onPick(r.best, subjectId); close(); } }, `Use ${r.best} for ${name}`)),
     ];
   };
   const card = h("div", { class: "modal", role: "dialog", "aria-modal": "true", "aria-labelledby": "bq-title" });
@@ -1395,7 +1416,7 @@ async function deleteSubject(id) {
 }
 
 function viewQuestions() {
-  if (!draft.boardInit) { draft.boardInit = true; if (state.settings.board) draft.board = state.settings.board; }
+  if (!draft.boardInit) { draft.boardInit = true; draft.board = L.boardForSubject(state.settings, draft.subjectId) || "Any exam board"; }
   if (draft.subjectId !== "__new" && !state.subjects.some((s) => s.id === draft.subjectId)) draft.subjectId = state.subjects[0] ? state.subjects[0].id : "__new";
   if (draft.filter !== "all" && !state.subjects.some((s) => s.id === draft.filter)) draft.filter = "all";
 
@@ -1403,7 +1424,7 @@ function viewQuestions() {
     h("h2", {}, "Which subject?"),
     h("p", { class: "muted small" }, "New questions go into this subject."),
     state.subjects.length > 0 && h("label", {}, "Add to",
-      h("select", { id: "form-subject", onchange: (e) => { draft.subjectId = e.target.value; render(); } },
+      h("select", { id: "form-subject", onchange: (e) => { draft.subjectId = e.target.value; draft.board = L.boardForSubject(state.settings, draft.subjectId) || "Any exam board"; render(); } },
         state.subjects.map((s) => h("option", { value: s.id, selected: s.id === draft.subjectId }, s.name)),
         h("option", { value: "__new", selected: draft.subjectId === "__new" }, "＋ New subject…"))),
     (draft.subjectId === "__new" || !state.subjects.length) && h("label", {}, "New subject name",
@@ -1427,7 +1448,7 @@ function viewQuestions() {
           draft.style = draft.styles[0];
           render();
         } }, l)))),
-      h("label", {}, "Exam board", h("select", { "aria-label": "Exam board", onchange: (e) => { draft.board = e.target.value; state.settings.board = e.target.value === "Any exam board" ? "" : e.target.value; save(); render(); } }, L.BOARDS.map((x) => opt(x, x, draft.board))))),
+      h("label", {}, "Exam board", h("select", { "aria-label": "Exam board", onchange: (e) => { draft.board = e.target.value; setBoardFor(draft.subjectId, e.target.value); save(); render(); } }, L.BOARDS.map((x) => opt(x, x, draft.board))))),
     h("label", {}, "Type of questions", h("select", { "aria-label": "Type of questions", onchange: (e) => { draft.mode = e.target.value; if (draft.mode === "exam" && Number(draft.count) > 20) draft.count = "5"; render(); } },
       [["quick", "Quick questions (short answers)"], ["exam", "Complete exam questions (marks + mark scheme)"]].map(([v, l]) => opt(v, l, draft.mode)))),
     draft.mode === "exam" && h("p", { class: "small muted", style: "margin:0 0 .6rem" }, "Questions set the way real papers set them, with a mark scheme. You write your answer and the app marks it for you (6 and 9 markers are marked in levels, like the real thing). They're saved as their own topic, like “Biology – Exam questions”, so they stay separate from your quick questions."),
@@ -1455,8 +1476,8 @@ function viewQuestions() {
         L.isBusinessSubject(chosenSubjectName(), draft.topic) && h("p", { class: "small muted", style: "margin:.25rem 0 0" }, "The “Outline one”, “Analyse” and “Justify” questions are set around a made-up business with a short case-study extract, like the Edexcel papers."),
         f.figures.length > 0 && h("p", { class: "small muted", style: "margin:.25rem 0 0" }, `Some questions may also come with a ${f.figures.map((x) => (x === "table" ? "table" : x + " chart")).join(", ").replace(/line chart/, "line graph").replace(/scatter chart/, "scatter graph")}.`));
     })(),
-    h("p", { class: "small", style: "margin:0 0 .5rem" }, h("button", { type: "button", class: "ghost small", onclick: () => openBoardQuiz((b) => { draft.board = b; state.settings.board = b; save(); render(); toast(`Exam board set to ${b}.`); }) }, "🤔 I don't know my exam board")),
-    h("p", { class: "small muted", style: "margin:0 0 .4rem" }, draft.board !== "Any exam board" ? `Questions will follow the ${draft.board} specification. Your board is remembered.` : "Pick your exam board and the questions will follow its specification. It's remembered for next time."),
+    h("p", { class: "small", style: "margin:0 0 .5rem" }, h("button", { type: "button", class: "ghost small", onclick: () => openBoardQuiz(draft.subjectId, (b, sid) => { setBoardFor(sid, b); if (sid === draft.subjectId) draft.board = b; save(); render(); toast(`Exam board for this subject set to ${b}.`); }) }, "🤔 I don't know my exam board")),
+    h("p", { class: "small muted", style: "margin:0 0 .4rem" }, draft.board !== "Any exam board" ? `Questions will follow the ${draft.board} specification. Your board is remembered for this subject.` : "Pick your exam board and the questions will follow its specification. It's remembered for next time."),
     h("label", { class: "row", style: "gap:.6rem;font-weight:600;margin:.3rem 0 .4rem" },
       h("input", { type: "checkbox", style: "width:auto;min-height:0;margin:0", checked: draft.paper, onchange: (e) => { draft.paper = e.target.checked; render(); } }),
       h("span", {}, "📄 Past-paper style questions")),
