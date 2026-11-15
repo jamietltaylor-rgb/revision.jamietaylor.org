@@ -900,6 +900,7 @@ function viewQuestion() {
           ok ? "✅ Correct! 1 out of 1 mark" : session.dontKnow ? "No problem — here's the answer:" : "❌ Not quite — 0 out of 1 mark",
           session.given && h("span", { class: "ans" }, `You chose: ${optLabel(q, session.given)}`),
           !ok && h("span", { class: "ans" }, `Correct answer: ${optLabel(q, q.a)}`)),
+          !ok && whyBox(q),
           h("div", { class: "row" }, h("button", { class: "primary", onclick: () => commit(ok) }, "Next →")));
       }
       return h("section", { class: "card" }, head, body);
@@ -960,6 +961,7 @@ function viewQuestion() {
       ok ? (session.aiAccepted ? "✅ Counts as correct!" : "✅ Correct!") : session.dontKnow ? "No problem — here's the answer:" : "❌ Not quite",
       session.given && !session.shown.options && h("span", { class: "ans" }, `You wrote: ${session.given}`),
       !ok || session.shown.options || session.aiAccepted || !sameAsAnswer(session.given, q.a) ? h("span", { class: "ans" }, `${ok && !session.shown.options ? "Exact answer" : "Answer"}: ${right}`) : null));
+    if (!ok) body.append(whyBox(q));
     const last = session.index >= total - 1 && !(!ok && !item.retry);
     const next = h("button", { class: "primary", onclick: () => commit(ok) }, last ? "Finish" : "Next →");
     body.append(h("div", { class: "row" }, next,
@@ -1111,6 +1113,7 @@ function commit(correct) {
   session.given = "";
   session.dontKnow = false;
   session.result = null;
+  session.why = null;
   session.picks = [];
   session.picked = null;
   if (session.index >= session.queue.length) finishSession();
@@ -1154,6 +1157,30 @@ function toggleSound() {
   save();
   if (state.settings.sound) playSound(true, true);
   render();
+}
+
+/** "Why?" box shown after a wrong answer: the AI explains the mix-up and why the right answer is right. Needs a login; otherwise it says so. */
+function whyBox(q) {
+  const key = `${session.index}:${session.given}`;
+  const subject = (state.subjects.find((x) => x.id === q.subjectId) || {}).name || "";
+  if (session.why && session.why.key !== key) session.why = null;
+  const load = () => {
+    const at = session.index;
+    session.why = { key, status: "loading", text: "" };
+    cloud.explainAnswer({ q: q.q, a: q.a, answer: session.dontKnow ? "" : session.given, subject: subject.replace(/ – Exam questions$/, ""), options: q.opts || (session.shown && session.shown.options) || [] })
+      .then((r) => { if (session && session.index === at && session.why && session.why.key === key) { session.why = { key, status: "done", text: r.explanation }; render(); } })
+      .catch((e) => { if (session && session.index === at && session.why && session.why.key === key) { session.why = { key, status: "error", text: (e && e.message) || "" }; render(); } });
+  };
+  if (!session.why) {
+    if (!cloud.signedIn) session.why = { key, status: "offline", text: "" };
+    else load();
+  }
+  const w = session.why;
+  const wrap = (...kids) => h("div", { class: "why", role: "status", style: "margin:.8rem 0;padding:.7rem .9rem;border-radius:12px;background:rgba(120,130,200,.14)" }, ...kids);
+  if (w.status === "loading") return wrap(h("b", {}, "💡 Why? "), h("span", { class: "muted" }, "Working it out…"));
+  if (w.status === "done") return wrap(h("b", {}, "💡 Why? "), h("span", {}, w.text));
+  if (w.status === "error") return wrap(h("span", { class: "small muted" }, "Couldn't get an explanation just now. "), h("button", { class: "ghost small", onclick: () => { session.why = null; render(); } }, "Try again"));
+  return wrap(h("span", { class: "small muted" }, "💡 Sign in to get a short explanation of why the answer is what it is."));
 }
 
 /** The Stop button: end the round now. Answers already given are kept and counted; with none yet, just go back home. */

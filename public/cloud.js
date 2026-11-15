@@ -191,10 +191,27 @@ export function createCloud(config, { fetchFn = (...a) => globalThis.fetch(...a)
     return json;
   }
 
+  /** Asks for a short explanation of why a wrong answer was wrong and why the right one is right. */
+  async function explainAnswer(request) {
+    const token = await freshToken();
+    const url = config.explainEndpoint || String(config.aiEndpoint || "/api/generate").replace(/generate$/, "explain");
+    let res;
+    try {
+      res = await fetchFn(url, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify(request) });
+    } catch {
+      throw new CloudError("Can't reach the server — check your internet connection.", "offline");
+    }
+    let json = null;
+    try { json = await res.json(); } catch { json = null; }
+    if (res.status === 404 || res.status === 405) throw new CloudError("The explainer isn't switched on yet.", "not_installed");
+    if (!res.ok || !json || typeof json.explanation !== "string") throw new CloudError((json && json.error) || "The explainer had a problem.", String(res.status));
+    return json;
+  }
+
   return {
     enabled,
     get user() { return session ? session.user : null; },
     get signedIn() { return Boolean(session); },
-    signUp, signIn, signOut, restore, loadData, saveData, generate, markAnswer, checkAnswer,
+    signUp, signIn, signOut, restore, loadData, saveData, generate, markAnswer, checkAnswer, explainAnswer,
   };
 }
