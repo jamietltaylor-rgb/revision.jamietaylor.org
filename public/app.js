@@ -857,7 +857,9 @@ function viewQuestion() {
   const head = h("div", {},
     h("div", { class: "row space" },
       h("span", { class: "small muted" }, `Question ${Math.min(session.index + 1, total)} of ${total}`),
-      session.combo >= 2 && h("span", { class: "tag" }, `🔥 ${session.combo} in a row`)),
+      h("span", { class: "row", style: "gap:.5rem" },
+        session.combo >= 2 && h("span", { class: "tag" }, `🔥 ${session.combo} in a row`),
+        h("button", { class: "ghost small", "aria-label": "Stop this round", onclick: stopRound }, "⏹ Stop"))),
     bar(Math.round((session.index / total) * 100), "Round progress"));
 
   const body = h("div", {},
@@ -1113,11 +1115,22 @@ function commit(correct) {
   render();
 }
 
+/** The Stop button: end the round now. Answers already given are kept and counted; with none yet, just go back home. */
+async function stopRound() {
+  if (!session || session.finished) return;
+  const answered = session.results.length;
+  if (!(await askConfirm({ title: "Stop this round?", message: answered ? `You've answered ${plural(answered, "question")} so far. Those are kept and counted, and you'll see your results.` : "You haven't answered anything yet, so nothing will be counted.", confirmLabel: "Stop", danger: false }))) return;
+  if (!answered) { session = null; go("home"); return; }
+  session.stopped = true;
+  finishSession();
+  render();
+}
+
 function finishSession() {
   if (session.finished) return;
   session.finished = true;
   track("quiz_finished");
-  if (session.results.length >= 5 && session.results.every(Boolean)) {
+  if (!session.stopped && session.results.length >= 5 && session.results.every(Boolean)) {
     state.stats.perfectRounds++;
     toast("🎯 A perfect round!");
   }
@@ -1131,7 +1144,7 @@ function viewSummary() {
   const pct = total ? Math.round((right / total) * 100) : 0;
   const badges = session.newBadges.map((id) => L.BADGES.find((b) => b.id === id)).filter(Boolean);
   return h("section", { class: "card" },
-    h("h1", {}, pct === 100 && total >= 5 ? "Perfect round! 🎯" : pct >= 70 ? "Nice work! 🎉" : "Round complete 💪"),
+    h("h1", {}, session.stopped ? "Round stopped ⏹" : pct === 100 && total >= 5 ? "Perfect round! 🎯" : pct >= 70 ? "Nice work! 🎉" : "Round complete 💪"),
     h("div", { class: "grid2" },
       h("div", { class: "stat" }, h("b", {}, `${right}/${total}`), h("span", {}, "right first time")),
       h("div", { class: "stat" }, h("b", {}, `+${session.pointsEarned}`), h("span", {}, "points")),
