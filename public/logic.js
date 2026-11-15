@@ -1206,7 +1206,7 @@ export function emptyState() {
     questions: [],
     treats: [],
     redeemed: [],
-    settings: { dailyGoal: DEFAULT_GOAL, board: "", subjectBoards: {} },
+    settings: { dailyGoal: DEFAULT_GOAL, board: "", subjectBoards: {}, sound: true },
     buddy: { name: "Pip" },
     chests: 0,
     lastParade: "",
@@ -1296,6 +1296,7 @@ export function sanitiseState(raw, catalogueIds = null) {
     }
   }
   out.settings.board = raw.settings && BOARDS.includes(raw.settings.board) && raw.settings.board !== "Any exam board" ? raw.settings.board : "";
+  out.settings.sound = !(raw.settings && raw.settings.sound === false);
   out.settings.subjectBoards = {};
   if (raw.settings && raw.settings.subjectBoards && typeof raw.settings.subjectBoards === "object") {
     for (const [k, v] of Object.entries(raw.settings.subjectBoards).slice(0, 100)) if (typeof k === "string" && k.length <= 60 && BOARDS.includes(v) && v !== "Any exam board") out.settings.subjectBoards[k] = v;

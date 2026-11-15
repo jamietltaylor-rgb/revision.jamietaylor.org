@@ -782,3 +782,9 @@ test("the exam board quiz can tell the boards apart from the types of question",
   const strong = L.scoreBoardQuiz({ types: pick("history", "types", "An organised summary"), code: L.boardQuizFor("history").find((q) => q.id === "code").options.findIndex(([l]) => l.startsWith("A J then")) }, "history");
   assert.equal(strong.sure, "high");
 });
+
+test("the sound setting defaults to on and can be switched off", () => {
+  assert.equal(L.sanitiseState({ subjects: [], settings: {} }).settings.sound, true);
+  assert.equal(L.sanitiseState({ subjects: [], settings: { sound: false } }).settings.sound, false);
+  assert.equal(L.sanitiseState({ subjects: [], settings: { sound: "no" } }).settings.sound, true);
+});

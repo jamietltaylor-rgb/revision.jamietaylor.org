@@ -860,6 +860,7 @@ function viewQuestion() {
       h("span", { class: "small muted" }, `Question ${Math.min(session.index + 1, total)} of ${total}`),
       h("span", { class: "row", style: "gap:.5rem" },
         session.combo >= 2 && h("span", { class: "tag" }, `🔥 ${session.combo} in a row`),
+        h("button", { class: "ghost small", "aria-label": soundOn() ? "Turn sounds off" : "Turn sounds on", onclick: toggleSound }, soundOn() ? "🔊" : "🔇"),
         h("button", { class: "ghost small", "aria-label": "Stop this round", onclick: stopRound }, "⏹ Stop"))),
     bar(Math.round((session.index / total) * 100), "Round progress"));
 
@@ -975,7 +976,7 @@ function submitMc(chosen) {
   session.given = String(chosen || "");
   session.dontKnow = !chosen;
   session.verdict = Boolean(chosen) && chosen === q.a;
-  session.stage = "feedback";
+  session.stage = "feedback"; playResultSound();
   render();
 }
 
@@ -990,11 +991,12 @@ function submitMc2(picked) {
   session.dontKnow = picked.length === 0;
   session.verdict = got === 2;
   session.result = { awarded: got, total: 2, points: [], feedback: "", source: "none" };
-  session.stage = "feedback";
+  session.stage = "feedback"; playResultSound();
   render();
 }
 
 async function submitExam(written) {
+  primeAudio();
   const q = currentQuestion();
   if (!q || !session) return;
   const given = String(written || "").trim();
@@ -1003,7 +1005,7 @@ async function submitExam(written) {
   session.dontKnow = !given;
   if (!given) {
     session.result = { awarded: 0, total: q.marks, points: L.schemePoints(q.a).map((text) => ({ text, met: false })), feedback: "", source: "none" };
-    session.stage = "feedback";
+    session.stage = "feedback"; playResultSound();
     return render();
   }
   session.stage = "marking";
@@ -1020,7 +1022,7 @@ async function submitExam(written) {
   track("exam_taken");
   if (result.source === "ai") track("ai_marked");
   session.result = result;
-  session.stage = "feedback";
+  session.stage = "feedback"; playResultSound();
   render();
 }
 
@@ -1046,7 +1048,7 @@ function check(given, dontKnow = false) {
   const typed = !session.shown.options;
   // Our own matching said no: let the AI decide if it's a typo, a synonym or another right answer.
   if (!session.verdict && !dontKnow && typed && session.given && cloud.signedIn) return askAiToCheck(q);
-  session.stage = "feedback";
+  session.stage = "feedback"; playResultSound();
   render();
 }
 
@@ -1060,7 +1062,7 @@ async function askAiToCheck(q) {
     if (r.correct) { session.verdict = true; session.aiAccepted = true; }
   } catch { /* the AI is unavailable: the normal "not quite" result stands */ }
   if (!session || session.index !== at || session.stage !== "checking") return;
-  session.stage = "feedback";
+  session.stage = "feedback"; playResultSound();
   render();
 }
 
@@ -1113,6 +1115,44 @@ function commit(correct) {
   session.picked = null;
   if (session.index >= session.queue.length) finishSession();
   save();
+  render();
+}
+
+// ---- Sounds: a little jingle for a right answer and a soft low tone for a wrong one (made in the browser, no files). Can be turned off in Settings.
+let audioCtx = null;
+function soundOn() { return !state || state.settings.sound !== false; }
+function primeAudio() {
+  try {
+    if (!audioCtx) { const AC = window.AudioContext || window.webkitAudioContext; if (AC) audioCtx = new AC(); }
+    if (audioCtx && audioCtx.state === "suspended") audioCtx.resume();
+  } catch { /* no sound available: carry on silently */ }
+}
+function tone(freq, at, dur, type = "sine", vol = 0.16) {
+  const o = audioCtx.createOscillator(), g = audioCtx.createGain(), t0 = audioCtx.currentTime + at;
+  o.type = type; o.frequency.setValueAtTime(freq, t0);
+  g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(vol, t0 + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  o.connect(g); g.connect(audioCtx.destination); o.start(t0); o.stop(t0 + dur + 0.05);
+}
+function playSound(good, force = false) {
+  if (!force && !soundOn()) return;
+  try {
+    primeAudio();
+    if (!audioCtx) return;
+    if (good) { [[523.25, 0], [659.25, 0.1], [783.99, 0.2], [1046.5, 0.3]].forEach(([f, at]) => tone(f, at, at === 0.3 ? 0.4 : 0.18, "triangle")); }
+    else { tone(220, 0, 0.22, "sawtooth", 0.08); tone(164.81, 0.18, 0.4, "sawtooth", 0.08); }
+  } catch { /* ignore */ }
+}
+/** Called when an answer's result appears. A right answer (or at least half the marks on an exam question) gets the jingle. */
+function playResultSound() {
+  if (!session || !soundOn()) return;
+  const r = session.result;
+  const good = r && r.total ? r.awarded * 2 >= r.total && r.awarded > 0 : Boolean(session.verdict);
+  playSound(good);
+}
+function toggleSound() {
+  state.settings.sound = !soundOn();
+  save();
+  if (state.settings.sound) playSound(true, true);
   render();
 }
 
@@ -1785,7 +1825,16 @@ function viewRewards() {
     h("p", { class: "muted small" }, `Answer this many questions a day to earn a chest (at least ${L.MIN_GOAL}). Weekly quests scale with it.`),
     h("label", {}, "Questions per day", goalInput));
 
-  return h("div", {}, buddyCard, chestCard, questCard, shopCard, treatCard, badgeCard, goalCard);
+  const soundCard = h("section", { class: "card" },
+    h("h2", {}, "Sounds"),
+    h("p", { class: "muted small" }, "A little jingle when you get an answer right and a low tone when you get it wrong."),
+    h("label", { class: "row", style: "gap:.5rem;align-items:center" },
+      h("input", { type: "checkbox", checked: soundOn(), "aria-label": "Play answer sounds", onchange: (e) => { state.settings.sound = e.target.checked; save(); render(); if (e.target.checked) playSound(true, true); } }),
+      "Play sounds when I answer"),
+    h("div", { class: "row", style: "gap:.5rem;margin-top:.5rem" },
+      h("button", { class: "ghost small", onclick: () => playSound(true, true) }, "▶ Hear the right-answer jingle"),
+      h("button", { class: "ghost small", onclick: () => playSound(false, true) }, "▶ Hear the wrong-answer sound")));
+  return h("div", {}, buddyCard, chestCard, questCard, shopCard, treatCard, badgeCard, goalCard, soundCard);
 }
 
 
