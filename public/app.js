@@ -773,6 +773,7 @@ function viewSetup() {
       : [h("option", { value: "10" }, "Normal — 10 questions"), h("option", { value: "5" }, "Quick — 5 questions"), h("option", { value: "20" }, "Long — 20 questions")],
     h("option", { value: "due" }, "Everything that's due today"),
     h("option", { value: "all" }, "Every question"));
+  lengthSel.value = "all"; // starts on "Every question"
   return h("section", { class: "card" },
     switcher,
     h("h1", { style: "margin-top:1rem" }, reviseMode === "exam" ? "Exam questions" : "Start a round"),
