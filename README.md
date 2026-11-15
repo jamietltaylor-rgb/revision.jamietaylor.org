@@ -65,3 +65,7 @@ Then redeploy (Deployments → the latest one → Retry, or make any small commi
 
 ## Exam guides (how real papers are laid out and marked)
 `public/examguides.js` holds, per subject and exam board, the paper layout, question styles, command words and mark-scheme rules, paraphrased from the exam boards' own published papers and mark schemes (each entry lists its `sources`). The question maker (`functions/api/generate.js`) and the marker (`functions/api/mark.js`) both read it. To add a subject, add an entry to `GUIDES`.
+
+## Updating the app
+
+After changing any file in `public/`, run `node tools/stamp.mjs` before committing. It writes a version into `public/index.html` so phones fetch the new files straight away instead of showing a saved copy for up to 4 hours (the tests fail if you forget).

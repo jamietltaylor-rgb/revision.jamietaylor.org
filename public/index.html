@@ -12,7 +12,7 @@
   <link rel="manifest" href="manifest.webmanifest">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Revise">
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="style.css?v=9773c847">
 </head>
 <body>
   <header class="top">
@@ -25,7 +25,8 @@
   <main id="app" class="wrap" tabindex="-1"></main>
   <div id="toasts" aria-live="polite"></div>
   <noscript><p class="wrap">This app needs JavaScript switched on.</p></noscript>
-  <script type="module" src="app.js"></script>
+  <script type="importmap">{"imports":{"./logic.js":"./logic.js?v=9773c847","./cloud.js":"./cloud.js?v=9773c847","./config.js":"./config.js?v=9773c847","./shop.js":"./shop.js?v=9773c847","./examguides.js":"./examguides.js?v=9773c847"}}</script>
+  <script type="module" src="app.js?v=9773c847"></script>
   <script src="stats.js?v=5" defer></script>
 </body>
 </html>
