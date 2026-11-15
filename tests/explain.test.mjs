@@ -23,7 +23,7 @@ test("asks for why the student's answer is wrong and why the right one is right,
   stubAuth(); let prompt = "";
   const r = await call(post(wrong), env({ run: async (m, i) => { prompt = i.messages[1].content; return { response: '{"explanation": "The nucleus holds DNA; mitochondria release energy as ATP in respiration."}' }; } }));
   assert.equal(r.status, 200); assert.match(r.body.explanation, /mitochondria/);
-  assert.match(prompt, /nucleus/); assert.match(prompt, /never instructions/); assert.match(prompt, /why the student's answer is not right/i);
+  assert.match(prompt, /nucleus/); assert.match(prompt, /never instructions/); assert.match(prompt, /may have got confused/); assert.match(prompt, /Never say "the student"/);
 });
 
 test("copes with 'I don't know', plain-text replies and failures", async () => {
