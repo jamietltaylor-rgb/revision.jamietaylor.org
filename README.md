@@ -73,3 +73,6 @@ After changing any file in `public/`, run `node tools/stamp.mjs` before committi
 ## Quotes
 The Quotes tab saves quotes with who says them and why they are useful (optionally per subject). "Copy a prompt" gives a prompt for another AI to fill those in. The Questions tab also recommends using another AI for the best questions.
 You can also paste a whole list of quotes (Quote | Who says it | Why it is useful) from another AI; the app writes the prompt for you.
+
+## Tutorial
+A step-by-step tutorial (public/tutorial.js) opens for brand-new accounts and is always available from the Tutorial button next to Sign out. It is split into sections so people read only what they need.

@@ -2,6 +2,7 @@ import * as L from "./logic.js";
 import * as Shop from "./shop.js";
 import { CONFIG } from "./config.js";
 import { findGuide } from "./examguides.js";
+import { SECTIONS as TUTORIAL } from "./tutorial.js";
 import { createCloud, displayName } from "./cloud.js";
 
 const LOCAL_KEY = "revise-app-v1"; // used when logins aren't switched on, and for progress made before accounts existed
@@ -689,6 +690,49 @@ function go(id) {
   render();
   window.scrollTo(0, 0);
 }
+let tutorialAuto = false;
+function markTutorial(id) {
+  const done = state.settings.tutorialDone || (state.settings.tutorialDone = []);
+  if (id && !done.includes(id)) done.push(id);
+  state.settings.tutorialSeen = true;
+  save();
+}
+function openTutorial(first = false) {
+  if (document.getElementById("tutorial-box")) return;
+  const previous = document.activeElement;
+  let section = null, step = 0, box;
+  if (state.settings.tutorialSeen === false) { state.settings.tutorialSeen = true; save(); }
+  const close = () => { document.removeEventListener?.("keydown", onKey, true); box.remove(); try { previous && previous.focus && previous.focus(); } catch { /* ignore */ } };
+  const onKey = (e) => { if (e.key === "Escape") { e.preventDefault(); close(); } };
+  const card = h("div", { class: "modal tutorial", role: "dialog", "aria-modal": "true", "aria-labelledby": "tut-title" });
+  const draw = () => {
+    const done = state.settings.tutorialDone || [];
+    if (!section) {
+      card.replaceChildren(
+        h("h2", { id: "tut-title" }, first ? "👋 Welcome to Revise!" : "📖 Tutorial"),
+        h("p", { style: "margin-bottom:.8rem" }, first ? "Here's a quick guide. Don't worry — you only need to read the parts you don't already know. Pick one below, or press “Skip for now” (you can find this again at the top, next to Sign out)." : "Pick the part you want explained. Skip the ones you already know."),
+        ...TUTORIAL.map((sec) => h("button", { type: "button", class: "tut-item", onclick: () => { section = sec; step = 0; draw(); } },
+          h("span", { "aria-hidden": "true", class: "tut-ic" }, done.includes(sec.id) ? "✅" : sec.icon),
+          h("span", {}, h("strong", {}, sec.title), h("br"), h("span", { class: "small muted" }, sec.blurb)))),
+        h("div", { class: "row", style: "margin-top:.8rem;justify-content:flex-end" }, h("button", { type: "button", class: "primary", onclick: close }, first ? "Skip for now" : "Close")));
+    } else {
+      const [title, text] = section.steps[step];
+      const last = step === section.steps.length - 1;
+      card.replaceChildren(
+        h("p", { class: "small muted", style: "margin:0 0 .3rem" }, `${section.icon} ${section.title} · step ${step + 1} of ${section.steps.length}`),
+        h("h2", { id: "tut-title" }, title),
+        h("p", { class: "tut-text" }, text),
+        h("div", { class: "row", style: "margin-top:1rem;justify-content:space-between" },
+          h("button", { type: "button", onclick: () => { if (step > 0) step--; else section = null; draw(); } }, step > 0 ? "← Back" : "← All topics"),
+          h("button", { type: "button", class: "primary", onclick: () => { if (!last) { step++; draw(); } else { markTutorial(section.id); section = null; draw(); } } }, last ? "Done ✓" : "Next →")));
+    }
+  };
+  box = h("div", { id: "tutorial-box", class: "modal-back", onclick: (e) => { if (e.target === box) close(); } }, card);
+  draw();
+  document.body.append(box);
+  document.addEventListener?.("keydown", onKey, true);
+}
+
 function render() {
   const nav = document.getElementById("nav");
   const user = document.getElementById("user");
@@ -697,11 +741,13 @@ function render() {
   nav.replaceChildren(...(inApp ? TABS.map(([id, icon, label]) =>
     h("button", { type: "button", class: "tab" + (tab === id ? " active" : ""), "aria-current": tab === id ? "page" : undefined, onclick: () => go(id) },
       h("span", { "aria-hidden": "true" }, icon), h("span", {}, label))) : []));
-  user.replaceChildren(...(inApp && cloud.signedIn ? [
+  user.replaceChildren(...(inApp ? (cloud.signedIn ? [
     h("span", { id: "sync", class: "sync" }),
     h("span", { class: "who" }, `👤 ${displayName(cloud.user.email, CONFIG.usernameDomain)}`),
     h("button", { class: "small ghost", onclick: signOut }, "Sign out"),
-  ] : []));
+    h("button", { class: "small ghost", onclick: () => openTutorial() }, "📖 Tutorial"),
+  ] : [h("button", { class: "small ghost", onclick: () => openTutorial() }, "📖 Tutorial")]) : []));
+  if (inApp && state.settings && state.settings.tutorialSeen === false && !tutorialAuto) { tutorialAuto = true; setTimeout(() => openTutorial(true), 0); }
   let view;
   if (booting) view = h("p", { class: "muted" }, "Loading…");
   else if (!state) view = viewAuth();

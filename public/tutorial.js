@@ -1,0 +1,63 @@
+// The tutorial: plain-English, step-by-step help. Each section covers one part of the app so people can read only what they don't know.
+export const SECTIONS = [
+  { id: "basics", icon: "👋", title: "The basics", blurb: "What this app is and how it works",
+    steps: [
+      ["What is Revise?", "Revise is an app that helps you remember things for your exams. You save questions and answers, then the app tests you on them. Every time you answer you earn points, and you can spend those points on rewards."],
+      ["The buttons at the bottom", "At the bottom of the screen (or the top on a computer) there is a row of buttons: Home, Revise, Questions, Quotes, Rewards, Farm and Plan. Tap one to go to that part of the app. The purple one is the part you are on now."],
+      ["Do I need to do everything?", "No! You only need two things to start: some questions (see the “Questions” tutorial) and then pressing Revise to answer them. Everything else is optional extras. You can come back to this tutorial any time with the Tutorial button at the top of the screen, next to Sign out."],
+      ["Is my stuff saved?", "Yes. If you are signed in, everything is saved to your account automatically, so you can use a different phone or computer and it will all be there. You will see “☁ Saved” at the top when it has saved."],
+    ] },
+  { id: "questions", icon: "✏️", title: "Adding questions", blurb: "Put questions into the app (do this first!)",
+    steps: [
+      ["Why start here?", "The app needs questions to test you on. No questions means nothing to revise, so this is the first thing to do. Tap the “Questions” button at the bottom."],
+      ["Pick a subject", "At the top, choose which subject the questions are for (like Maths or Biology). If your subject isn't there, you can type a new one and it will be made for you."],
+      ["Best way: use another AI", "The best way to get good questions is to use another AI such as ChatGPT or Gemini. Press the purple “Copy a prompt for another AI” button. This copies a message to your clipboard. Open ChatGPT or Gemini, paste the message in (press and hold, then Paste), and send it."],
+      ["Paste the answer back", "The AI will write a list of questions. Copy its whole reply, come back to Revise, and paste it into the box called “Paste a list of questions”. Press “Check the list”, look it over, then press the Add button."],
+      ["The other button", "“✨ Make questions for me” makes questions inside this app with no copying. It's quicker but the results may not be as good, and it uses a limited free daily allowance. Fine to try, just check the answers."],
+      ["Adding just one question", "Got a single question from your notes? Use “Add one question”: type the question, type the right answer, and optionally add wrong answers so it becomes multiple choice. Then press Add."],
+      ["Exam board", "Different exam boards (AQA, Edexcel, OCR and so on) write different style questions. Pick yours in the exam board box. Not sure which you have? Press “I don't know my exam board” and answer a few quick questions. Every subject remembers its own board."],
+    ] },
+  { id: "revise", icon: "📝", title: "Doing a revision round", blurb: "Answering questions and earning points",
+    steps: [
+      ["Start", "Tap “Revise” at the bottom. Choose the subject you want, then pick how many questions you want. “Every question” is already chosen for you. Then press the start button."],
+      ["Answering", "A question appears. Type your answer (or tap one of the choices if there are any) and press Check. The app tells you if you were right."],
+      ["Right or wrong", "If you are right you earn points and hear a happy sound. If you are wrong you hear a soft low sound and the right answer is shown. Either way there is a “why” box that explains the answer in simple words, so you actually learn it."],
+      ["Questions come back", "Questions you get wrong come back sooner, and ones you get right come back later. That's on purpose — it's the best way to make things stick in your memory."],
+      ["Stopping early", "Need to stop? Press the Stop button in the round. You keep the points you've earned so far. The speaker button next to it turns the sounds on or off."],
+      ["Exam-style questions", "Some questions are longer, like real exam ones with marks. Type your full answer and the app marks it and tells you what points you missed."],
+    ] },
+  { id: "quotes", icon: "💬", title: "Quotes", blurb: "Remember quotes and why they matter",
+    steps: [
+      ["What is it for?", "Subjects like English need you to remember quotes. This tab is a notebook just for them. Tap “Quotes” at the bottom."],
+      ["Save a quote", "Type the quote in the first box. In “Who says it” write the person and where (like “Macbeth, Act 2”). In “Why it's useful” write what it shows, so you know when to use it in an answer. Press Save quote."],
+      ["Don't know who says it?", "Press “Copy a prompt to find who says it & why”, paste it into ChatGPT or Gemini and it will tell you. Always double-check it against your own notes."],
+      ["Lots of quotes at once", "Use “Paste a list of quotes”. Say what subject and topic, press “Copy a prompt for another AI”, paste it into the other AI, then paste its answer back in and press Check the list, then Add."],
+    ] },
+  { id: "rewards", icon: "🏆", title: "Rewards and points", blurb: "What the points are for",
+    steps: [
+      ["Earning points", "Every right answer earns points. Revising each day also builds your streak (the number of days in a row you've revised). Hit your daily goal and you win a chest."],
+      ["Chests", "In the Rewards tab, tap a chest to open it for a surprise prize."],
+      ["The shop", "Spend your points on colour themes, fonts and hats for your companion. Tap the thing you want. You can only buy it if you have enough points."],
+      ["Real-life rewards", "You can add your own treats, like “30 minutes on my game” or “a snack”, and set how many points they cost. When you've earned enough, you “spend” the points and enjoy the treat. It's a good way to make yourself revise!"],
+      ["Daily goal and sounds", "Lower down you can change your daily goal (how many questions a day) and turn the right and wrong sounds on or off."],
+    ] },
+  { id: "farm", icon: "🌾", title: "Farm and companion", blurb: "Your pet and farm that grow as you revise",
+    steps: [
+      ["Your companion", "You have a little companion that grows as you level up. You level up by earning points. It evolves into new forms as you reach certain levels."],
+      ["The Farm", "Tap “Farm” at the bottom. It's a fun place that grows the more you revise. There's nothing you have to do here, it's a reward for working hard."],
+    ] },
+  { id: "plan", icon: "📅", title: "Exam planner", blurb: "Add your exam dates and get a timetable",
+    steps: [
+      ["Why?", "Add your exams and the app helps you see what's coming up, so you know how long you've got. Tap “Plan” at the bottom."],
+      ["Add an exam", "Tap a day on the calendar, type the subject, choose the exam type and press add. You can also paste a whole timetable from your school in one go."],
+      ["Copying from a photo", "Got your timetable as a photo? Press the copy prompt button, give that prompt and your photo to another AI, and paste its reply back in."],
+      ["Revision timetable", "Say how much time you can revise and the app makes a day-by-day plan leading up to each exam."],
+    ] },
+  { id: "account", icon: "⚙️", title: "Account and settings", blurb: "Signing out, backups and this tutorial",
+    steps: [
+      ["Signing out", "At the very top of the screen is a Sign out button. Press it when you're on someone else's device. Your work stays safe in your account."],
+      ["Signing back in", "Sign in again with the same username and password and everything will be exactly as you left it."],
+      ["Tutorial button", "The Tutorial button, right next to Sign out, opens this help any time. Pick only the section you need."],
+      ["Backup", "On the Questions tab, at the bottom, there is a Backup box so you can save a copy of everything or restore it."],
+    ] },
+];

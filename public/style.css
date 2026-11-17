@@ -250,3 +250,8 @@ button.danger-solid:hover:not(:disabled) { border-color: var(--bad); filter: bri
 .chips { display: flex; flex-wrap: wrap; gap: .4rem; }
 .chip { font-size: .88rem; padding: .35rem .8rem; min-height: 38px; border-radius: 999px; }
 .chip.on { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+
+.modal.tutorial { max-height: 90vh; overflow-y: auto; }
+.tut-text { font-size: 1.1rem; line-height: 1.5; color: var(--fg); }
+.tut-item { display: flex; align-items: center; gap: .8rem; width: 100%; text-align: left; margin: 0 0 .5rem; padding: .7rem .8rem; }
+.tut-ic { font-size: 1.6rem; }

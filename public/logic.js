@@ -1207,7 +1207,7 @@ export function emptyState() {
     treats: [],
     redeemed: [],
     quotes: [],
-    settings: { dailyGoal: DEFAULT_GOAL, board: "", subjectBoards: {}, sound: true },
+    settings: { dailyGoal: DEFAULT_GOAL, board: "", subjectBoards: {}, sound: true, tutorialSeen: false, tutorialDone: [] },
     buddy: { name: "Pip" },
     chests: 0,
     lastParade: "",
@@ -1350,6 +1350,9 @@ export function sanitiseState(raw, catalogueIds = null) {
   }
   out.settings.board = raw.settings && BOARDS.includes(raw.settings.board) && raw.settings.board !== "Any exam board" ? raw.settings.board : "";
   out.settings.sound = !(raw.settings && raw.settings.sound === false);
+  // Existing accounts never get the welcome pop-up; only brand-new ones start with tutorialSeen false.
+  out.settings.tutorialSeen = !(raw.settings && raw.settings.tutorialSeen === false);
+  out.settings.tutorialDone = Array.isArray(raw.settings && raw.settings.tutorialDone) ? raw.settings.tutorialDone.filter((x) => typeof x === "string" && x.length <= 30).slice(0, 20) : [];
   out.settings.subjectBoards = {};
   if (raw.settings && raw.settings.subjectBoards && typeof raw.settings.subjectBoards === "object") {
     for (const [k, v] of Object.entries(raw.settings.subjectBoards).slice(0, 100)) if (typeof k === "string" && k.length <= 60 && BOARDS.includes(v) && v !== "Any exam board") out.settings.subjectBoards[k] = v;

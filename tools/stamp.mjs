@@ -6,8 +6,8 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 
 const pub = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "public");
-export const FILES = ["app.js", "logic.js", "cloud.js", "config.js", "shop.js", "examguides.js", "style.css"];
-export const MODULES = ["logic.js", "cloud.js", "config.js", "shop.js", "examguides.js"];
+export const FILES = ["app.js", "logic.js", "cloud.js", "config.js", "shop.js", "examguides.js", "tutorial.js", "style.css"];
+export const MODULES = ["logic.js", "cloud.js", "config.js", "shop.js", "examguides.js", "tutorial.js"];
 export const versionOf = () => {
   const h = createHash("sha1");
   for (const f of FILES) h.update(f).update(readFileSync(path.join(pub, f)));
