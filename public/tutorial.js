@@ -31,6 +31,8 @@ export const SECTIONS = [
       ["What is it for?", "Subjects like English need you to remember quotes. This tab is a notebook just for them. Tap “Quotes” at the bottom."],
       ["Save a quote", "Type the quote in the first box. In “Who says it” write the person and where (like “Macbeth, Act 2”). In “Why it's useful” write what it shows, so you know when to use it in an answer. Press Save quote."],
       ["Don't know who says it?", "Press “Copy a prompt to find who says it & why”, paste it into ChatGPT or Gemini and it will tell you. Always double-check it against your own notes."],
+      ["Quotes quiz", "Press “Start quiz” to test yourself. Sometimes you fill in missing words, sometimes you pick who said it. Quotes you get wrong come back sooner; ones you know come back later, which is how you really remember them. You earn points too."],
+      ["Hear it read aloud", "Press the 🔊 button on any quote to hear it. You can pick the voice in the Quotes quiz box. The AI voice works when you're signed in and is saved on your device after the first time; otherwise your device's own voice reads it."],
       ["Lots of quotes at once", "Use “Paste a list of quotes”. Say what subject and topic, press “Copy a prompt for another AI”, paste it into the other AI, then paste its answer back in and press Check the list, then Add."],
     ] },
   { id: "rewards", icon: "🏆", title: "Rewards and points", blurb: "What the points are for",

@@ -208,10 +208,31 @@ export function createCloud(config, { fetchFn = (...a) => globalThis.fetch(...a)
     return json;
   }
 
+  /** Asks the server to read some text aloud. Returns an audio Blob (MP3). */
+  async function speak(text, speaker) {
+    const token = await freshToken();
+    const url = config.speakEndpoint || String(config.aiEndpoint || "/api/generate").replace(/generate$/, "speak");
+    let res;
+    try {
+      res = await fetchFn(url, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify({ text, speaker }) });
+    } catch {
+      throw new CloudError("Can't reach the server — check your internet connection.", "offline");
+    }
+    if (res.status === 404 || res.status === 405) throw new CloudError("The AI voice isn't switched on yet.", "not_installed");
+    if (!res.ok) {
+      let json = null;
+      try { json = await res.json(); } catch { json = null; }
+      throw new CloudError((json && json.error) || "The voice had a problem.", String(res.status));
+    }
+    const blob = await res.blob();
+    if (!blob || blob.size < 100) throw new CloudError("The voice had a problem.", "empty");
+    return blob;
+  }
+
   return {
     enabled,
     get user() { return session ? session.user : null; },
     get signedIn() { return Boolean(session); },
-    signUp, signIn, signOut, restore, loadData, saveData, generate, markAnswer, checkAnswer, explainAnswer,
+    signUp, signIn, signOut, restore, loadData, saveData, generate, markAnswer, checkAnswer, explainAnswer, speak,
   };
 }

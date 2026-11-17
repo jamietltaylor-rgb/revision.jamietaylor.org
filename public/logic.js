@@ -1207,7 +1207,7 @@ export function emptyState() {
     treats: [],
     redeemed: [],
     quotes: [],
-    settings: { dailyGoal: DEFAULT_GOAL, board: "", subjectBoards: {}, sound: true, tutorialSeen: false, tutorialDone: [] },
+    settings: { dailyGoal: DEFAULT_GOAL, board: "", subjectBoards: {}, sound: true, voice: "athena", tutorialSeen: false, tutorialDone: [] },
     buddy: { name: "Pip" },
     chests: 0,
     lastParade: "",
@@ -1228,6 +1228,42 @@ const str = (v, max) => (typeof v === "string" ? v.trim().slice(0, max) : "");
 const num = (v, min, max, fallback) => (Number.isFinite(v) ? Math.min(max, Math.max(min, v)) : fallback);
 
 /** Turns anything loaded from storage, the cloud or an imported file into safe, well-formed data. */
+export const VOICES = [["athena", "Athena (British woman)"], ["helios", "Helios (British man)"], ["luna", "Luna (warm woman)"], ["asteria", "Asteria (woman)"], ["orion", "Orion (man)"], ["arcas", "Arcas (man)"]];
+
+const BLANK_SKIP = new Set("this that with have from they them their there were what when which would could should about into than then your yours will shall been being also just some such very more most only over under upon".split(" "));
+/** Hides some of the important words in a quote. Returns pieces: {t: text} or {t: text, blank: true}. */
+export function makeBlanks(text, rand = Math.random, level = 1) {
+  const parts = String(text || "").match(/[\p{L}\p{N}'’-]+|[^\p{L}\p{N}'’-]+/gu) || [];
+  const isWord = (x) => /^[\p{L}\p{N}'’-]+$/u.test(x);
+  const words = parts.map((x, i) => [x, i]).filter(([x]) => isWord(x));
+  let cands = words.filter(([x]) => x.length >= 4 && !BLANK_SKIP.has(x.toLowerCase()));
+  if (cands.length < 2) cands = words.filter(([x]) => x.length >= 3);
+  const want = Math.max(1, Math.min(cands.length, Math.round(cands.length * Math.min(0.8, 0.3 + 0.2 * (level - 1)))));
+  const chosen = new Set(shuffle(cands, rand).slice(0, want).map(([, i]) => i));
+  return parts.map((x, i) => (chosen.has(i) ? { t: x, blank: true } : { t: x }));
+}
+
+/** The speaker's name without the act/scene bit, e.g. "Macbeth, Act 2 Scene 1" -> "Macbeth". */
+export const speakerName = (who) => String(who || "").split(/[,(;–—]| - /)[0].trim();
+
+export function isCorrectSpeaker(given, who) {
+  const want = speakerName(who);
+  const got = String(given || "").trim();
+  if (!want || !got) return false;
+  if (isCorrect(got, want)) return true;
+  const norm = (x) => String(x).toLowerCase().replace(/[^\p{L}\p{N} ]+/gu, " ").replace(/\s+/g, " ").trim();
+  const w = norm(want), g = norm(got);
+  return g.length >= 3 && (w === g || w.split(" ").includes(g) || g.split(" ").includes(w));
+}
+
+/** Due quotes first, weakest first. */
+export function pickQuotes(quotes, { subjectId = "all", count = 10, today, rand = Math.random }) {
+  const pool = (quotes || []).filter((q) => subjectId === "all" || q.subjectId === subjectId);
+  const isDue = (q) => (q.due || "") <= today;
+  const ranked = shuffle(pool, rand).sort((a, b) => (isDue(a) ? 0 : 1) - (isDue(b) ? 0 : 1) || (a.box || 1) - (b.box || 1) || String(a.due).localeCompare(String(b.due)));
+  return { picked: ranked.slice(0, count), dueCount: pool.filter(isDue).length };
+}
+
 export function buildQuotePrompt(quote, subject = "") {
   const q = String(quote || "").trim();
   return `I'm revising${subject ? " " + subject : ""} for my exams. For this quote:\n\n"${q}"\n\n1. Who says it (and in which text, scene or source)?\n2. Why is it useful to remember — what does it show, and which exam topics or questions could I use it for?\n\nKeep each answer to one or two short sentences, and tell me if you aren't sure of the source.`;
@@ -1339,7 +1375,7 @@ export function sanitiseState(raw, catalogueIds = null) {
       const id = str(x && x.id, 40);
       const text = str(x && x.text, 600);
       if (!id || !text) continue;
-      out.quotes.push({ id, text, who: str(x.who, 120), why: str(x.why, 600), subjectId: str(x.subjectId, 40), date: typeof x.date === "string" && DATE_RE.test(x.date) ? x.date : "" });
+      out.quotes.push({ id, text, who: str(x.who, 120), why: str(x.why, 600), subjectId: str(x.subjectId, 40), date: typeof x.date === "string" && DATE_RE.test(x.date) ? x.date : "", box: Math.round(num(x.box, 1, MAX_BOX, 1)), due: typeof x.due === "string" && DATE_RE.test(x.due) ? x.due : "1970-01-01", right: Math.round(num(x.right, 0, 1e6, 0)), wrong: Math.round(num(x.wrong, 0, 1e6, 0)) });
     }
   }
   if (Array.isArray(raw.redeemed)) {
@@ -1350,6 +1386,7 @@ export function sanitiseState(raw, catalogueIds = null) {
   }
   out.settings.board = raw.settings && BOARDS.includes(raw.settings.board) && raw.settings.board !== "Any exam board" ? raw.settings.board : "";
   out.settings.sound = !(raw.settings && raw.settings.sound === false);
+  out.settings.voice = raw.settings && VOICES.some((v) => v[0] === raw.settings.voice) ? raw.settings.voice : "athena";
   // Existing accounts never get the welcome pop-up; only brand-new ones start with tutorialSeen false.
   out.settings.tutorialSeen = !(raw.settings && raw.settings.tutorialSeen === false);
   out.settings.tutorialDone = Array.isArray(raw.settings && raw.settings.tutorialDone) ? raw.settings.tutorialDone.filter((x) => typeof x === "string" && x.length <= 30).slice(0, 20) : [];

@@ -804,3 +804,18 @@ test("pasted quote lists parse", () => {
   assert.equal(L.parseQuoteList('[{"quote":"x","who":"y","why":"z"}]').items[0].who, "y");
   assert.match(L.buildQuoteListPrompt({ subject: "English", count: 5 }), /5 important quotes/);
 });
+
+test("quote blanks, speaker matching and picking", () => {
+  const parts = L.makeBlanks("Is this a dagger which I see before me?", () => 0.1);
+  assert.ok(parts.some((p) => p.blank));
+  assert.equal(parts.map((p) => p.t).join(""), "Is this a dagger which I see before me?");
+  assert.equal(L.speakerName("Macbeth, Act 2 Scene 1"), "Macbeth");
+  assert.ok(L.isCorrectSpeaker("macbeth", "Macbeth, Act 2 Scene 1"));
+  assert.ok(L.isCorrectSpeaker("lady", "Lady Macbeth (Act 1)"));
+  assert.ok(!L.isCorrectSpeaker("banquo", "Macbeth"));
+  const s = L.sanitiseState({ quotes: [{ id: "a", text: "t", box: 3, due: "2026-11-20" }] });
+  assert.equal(s.quotes[0].box, 3);
+  const r = L.pickQuotes([{ id: "1", box: 1, due: "2026-12-01" }, { id: "2", box: 2, due: "2026-11-01" }], { today: "2026-11-17", count: 1 });
+  assert.equal(r.picked[0].id, "2");
+  assert.equal(L.sanitiseState({ settings: { voice: "nope" } }).settings.voice, "athena");
+});
