@@ -455,7 +455,7 @@ function planHomeCard() {
       : h("p", { class: "small muted", style: "margin:.2rem 0 0" }, day.off ? "Today is a rest day 😴" : "Nothing planned for today."));
 }
 
-const quoteUI = { text: "", who: "", why: "", subjectId: "", filter: "all", prompt: "" };
+const quoteUI = { text: "", who: "", why: "", subjectId: "", filter: "all", prompt: "", listSubjectId: "", listTopic: "", listCount: 10, listPrompt: "", paste: "", preview: null };
 function addQuote() {
   const text = quoteUI.text.trim();
   if (!text) { toast("Type the quote first."); return; }
@@ -463,6 +463,28 @@ function addQuote() {
   state.quotes.unshift({ id: L.uid(), text: text.slice(0, 600), who: quoteUI.who.trim().slice(0, 120), why: quoteUI.why.trim().slice(0, 600), subjectId: quoteUI.subjectId, date: today() });
   quoteUI.text = ""; quoteUI.who = ""; quoteUI.why = ""; quoteUI.prompt = "";
   save(); render(); toast("Quote saved ✓");
+}
+async function copyQuoteListPrompt() {
+  const sub = (state.subjects.find((x) => x.id === quoteUI.listSubjectId) || {}).name || "";
+  quoteUI.listPrompt = L.buildQuoteListPrompt({ subject: sub, topic: quoteUI.listTopic, count: quoteUI.listCount });
+  let copied = false;
+  try { await navigator.clipboard.writeText(quoteUI.listPrompt); copied = true; } catch { copied = false; }
+  toast(copied ? "Prompt copied — paste it into another AI ✓" : "Copy the prompt from the box below.");
+  render();
+}
+function checkQuoteList() {
+  const r = L.parseQuoteList(quoteUI.paste);
+  quoteUI.preview = r;
+  if (!r.items.length) toast("I couldn't find any quotes — use  Quote | Who says it | Why it's useful  on each line.");
+  render();
+}
+function addQuoteList() {
+  const r = quoteUI.preview; if (!r || !r.items.length) return;
+  state.quotes = state.quotes || [];
+  for (const x of [...r.items].reverse()) state.quotes.unshift({ id: L.uid(), ...x, subjectId: quoteUI.listSubjectId, date: today() });
+  const n = r.items.length;
+  quoteUI.paste = ""; quoteUI.preview = null; quoteUI.listPrompt = "";
+  save(); render(); toast(`${n} quote${n === 1 ? "" : "s"} added ✓`);
 }
 async function copyQuotePrompt() {
   if (!quoteUI.text.trim()) { toast("Type the quote first, then copy the prompt."); return; }
@@ -489,6 +511,22 @@ function viewQuotes() {
       h("button", { class: "ghost", onclick: copyQuotePrompt }, "Copy a prompt to find who says it & why")),
     h("p", { class: "small muted", style: "margin:.6rem 0 0" }, "💡 Not sure who says it or why it matters? Another AI (like ChatGPT or Gemini) is the best place to ask — and always check it against your own notes or the text."),
     quoteUI.prompt && h("label", { style: "margin-top:.8rem" }, "Prompt to copy", h("textarea", { readonly: true, style: "min-height:9rem", onfocus: (e) => e.target.select?.() }, quoteUI.prompt)));
+  const pv = quoteUI.preview;
+  const listCard = h("section", { class: "card" },
+    h("h2", {}, "Paste a list of quotes"),
+    h("p", { class: "muted small" }, "Get a whole list from another AI (like ChatGPT or Gemini): fill in the boxes, copy the prompt, paste it there, then paste its answer here. One per line, like  Quote | Who says it | Why it's useful."),
+    h("label", {}, "Subject (optional)", h("select", { "aria-label": "Subject for the list", onchange: (e) => { quoteUI.listSubjectId = e.target.value; } }, subjOpts(quoteUI.listSubjectId, "No subject"))),
+    h("label", {}, "Topic or text (optional)", h("input", { type: "text", "aria-label": "Topic for the quotes", placeholder: "Macbeth, ambition", value: quoteUI.listTopic, oninput: (e) => { quoteUI.listTopic = e.target.value; } })),
+    h("label", {}, "How many", h("select", { "aria-label": "How many quotes", onchange: (e) => { quoteUI.listCount = Number(e.target.value); } }, [5, 10, 15, 20, 30].map((n) => h("option", { value: n, selected: quoteUI.listCount === n }, String(n))))),
+    h("button", { style: "margin-top:.6rem", onclick: copyQuoteListPrompt }, "Copy a prompt for another AI"),
+    quoteUI.listPrompt && h("label", { style: "margin-top:.8rem" }, "Prompt to copy", h("textarea", { readonly: true, style: "min-height:9rem", onfocus: (e) => e.target.select?.() }, quoteUI.listPrompt)),
+    h("label", { style: "margin-top:.8rem" }, "Paste the AI's answer", h("textarea", { "aria-label": "Quotes to add", style: "min-height:8rem", placeholder: "\"To be, or not to be\" | Hamlet, Act 3 Scene 1 | Shows his doubt about life and death", oninput: (e) => { quoteUI.paste = e.target.value; quoteUI.preview = null; } }, quoteUI.paste)),
+    h("button", { style: "margin-top:.6rem", onclick: checkQuoteList }, "Check the list"),
+    pv && pv.items.length > 0 && h("div", { style: "margin-top:.8rem" },
+      h("p", { class: "verdict good" }, `Found ${pv.items.length} quote${pv.items.length === 1 ? "" : "s"}${pv.skipped ? ` (skipped ${pv.skipped})` : ""}.`),
+      ...pv.items.slice(0, 5).map((x) => h("p", { class: "small", style: "margin:.2rem 0" }, `“${x.text.slice(0, 80)}${x.text.length > 80 ? "…" : ""}” — ${x.who || "no speaker"}`)),
+      pv.items.length > 5 && h("p", { class: "small muted" }, `…and ${pv.items.length - 5} more`),
+      h("button", { class: "primary", style: "margin-top:.5rem", onclick: addQuoteList }, `Add ${pv.items.length} quote${pv.items.length === 1 ? "" : "s"}`)));
   const list = h("section", { class: "card" },
     h("h2", {}, `Your quotes (${all.length})`),
     all.length > 0 && h("label", {}, "Show", h("select", { "aria-label": "Filter quotes", onchange: (e) => { quoteUI.filter = e.target.value; render(); } }, [h("option", { value: "all", selected: quoteUI.filter === "all" }, "All subjects"), ...state.subjects.map((x) => h("option", { value: x.id, selected: quoteUI.filter === x.id }, x.name))])),
@@ -502,7 +540,7 @@ function viewQuotes() {
         sub && h("p", { class: "small muted", style: "margin:.15rem 0" }, sub),
         h("button", { class: "ghost small", style: "margin-top:.4rem", onclick: () => { state.quotes = state.quotes.filter((y) => y.id !== x.id); save(); render(); } }, "Delete"));
     }));
-  return h("div", {}, form, list);
+  return h("div", {}, form, listCard, list);
 }
 
 function viewPlan() {

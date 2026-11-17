@@ -1233,6 +1233,44 @@ export function buildQuotePrompt(quote, subject = "") {
   return `I'm revising${subject ? " " + subject : ""} for my exams. For this quote:\n\n"${q}"\n\n1. Who says it (and in which text, scene or source)?\n2. Why is it useful to remember — what does it show, and which exam topics or questions could I use it for?\n\nKeep each answer to one or two short sentences, and tell me if you aren't sure of the source.`;
 }
 
+export function buildQuoteListPrompt({ subject = "", topic = "", count = 10 } = {}) {
+  const n = Math.max(1, Math.min(40, Math.round(Number(count)) || 10));
+  const about = [subject, topic].map((x) => String(x || "").trim()).filter(Boolean).join(" - ");
+  return `Give me ${n} important quotes to remember for my exams${about ? " on " + about : ""}.\n\nWrite exactly one quote per line in this format, with nothing before or after the list:\n\nQuote | Who says it (and where) | Why it is useful\n\nExample:\n"Is this a dagger which I see before me?" | Macbeth, Act 2 Scene 1 | Shows his guilt and growing madness - good for ambition questions\n\nOnly use real, accurate quotes. Keep "Why it is useful" to one short sentence. Do not number the lines or use a table.`;
+}
+
+export function parseQuoteList(text) {
+  const items = [];
+  let skipped = 0;
+  const raw = String(text || "").trim();
+  const clean = (v) => String(v || "").trim().replace(/^[-*•\d.)\s]+(?=["“‘'])/, "").slice(0, 600);
+  const push = (q, who, why) => {
+    const t = String(q || "").trim().replace(/^[-*•]\s+|^\d+[.)]\s+/, "");
+    if (!t) { skipped++; return; }
+    items.push({ text: t.slice(0, 600), who: String(who || "").trim().slice(0, 120), why: String(why || "").trim().slice(0, 600) });
+  };
+  if (raw.startsWith("[")) {
+    try {
+      const arr = JSON.parse(raw);
+      if (Array.isArray(arr)) {
+        for (const x of arr) push(x && (x.quote || x.text), x && (x.who || x.speaker), x && (x.why || x.useful));
+        return { items, skipped };
+      }
+    } catch { /* fall through to lines */ }
+  }
+  for (const line of raw.split(/\r?\n/)) {
+    let l = line.trim();
+    if (!l) continue;
+    if (/^\|?[\s:|-]+\|?$/.test(l) && l.includes("-")) continue;
+    if (l.startsWith("|") && l.endsWith("|")) l = l.slice(1, -1);
+    const parts = (l.includes("\t") ? l.split("\t") : l.split("|")).map((x) => x.trim());
+    if (/^quotes?$/i.test(parts[0])) continue;
+    if (parts.length === 1 && l.length < 3) { skipped++; continue; }
+    push(clean(parts[0]) || parts[0], parts[1], parts.slice(2).join(" | "));
+  }
+  return { items, skipped };
+}
+
 export function sanitiseState(raw, catalogueIds = null) {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("That file isn't a revision backup.");
   const out = emptyState();

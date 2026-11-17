@@ -795,3 +795,12 @@ test("quotes are kept and cleaned", () => {
   assert.equal(s.quotes[0].text, "To be");
   assert.match(L.buildQuotePrompt("x", "English"), /Who says it/);
 });
+
+test("pasted quote lists parse", () => {
+  const r = L.parseQuoteList('Quote | Who | Why\n1. "To be" | Hamlet | doubt\n| "Out, spot" | Lady Macbeth | guilt |\n|---|---|---|\n"Alone" | Me');
+  assert.equal(r.items.length, 3);
+  assert.equal(r.items[1].who, "Lady Macbeth");
+  assert.equal(r.items[0].why, "doubt");
+  assert.equal(L.parseQuoteList('[{"quote":"x","who":"y","why":"z"}]').items[0].who, "y");
+  assert.match(L.buildQuoteListPrompt({ subject: "English", count: 5 }), /5 important quotes/);
+});
