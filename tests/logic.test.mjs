@@ -819,3 +819,9 @@ test("quote blanks, speaker matching and picking", () => {
   assert.equal(r.picked[0].id, "2");
   assert.equal(L.sanitiseState({ settings: { voice: "nope" } }).settings.voice, "athena");
 });
+
+test("quote similarity and first letters", () => {
+  assert.equal(L.quoteSimilarity("Out damned spot out I say", "Out, damned spot! Out, I say!"), 1);
+  assert.ok(L.quoteSimilarity("out spot", "Out, damned spot! Out, I say!") < 0.5);
+  assert.equal(L.firstLetters("Is this a dagger?"), "I t a d?");
+});

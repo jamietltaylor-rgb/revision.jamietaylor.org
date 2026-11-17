@@ -6,7 +6,7 @@ import { SECTIONS as TUTORIAL } from "./tutorial.js";
 import { createCloud, displayName } from "./cloud.js";
 
 const LOCAL_KEY = "revise-app-v1"; // used when logins aren't switched on, and for progress made before accounts existed
-const TABS = [["home", "🏠", "Home"], ["revise", "📝", "Revise"], ["questions", "✏️", "Questions"], ["quotes", "💬", "Quotes"], ["rewards", "🏆", "Rewards"], ["farm", "🌾", "Farm"], ["plan", "📅", "Plan"]];
+const TABS = [["home", "🏠", "Home"], ["revise", "📝", "Revise"], ["questions", "✏️", "Questions"], ["ask", "💡", "Ask"], ["quotes", "💬", "Quotes"], ["rewards", "🏆", "Rewards"], ["farm", "🌾", "Farm"], ["plan", "📅", "Plan"]];
 const TAB_IDS = TABS.map((t) => t[0]);
 const CATALOGUE = new Set(Shop.ITEMS.map((i) => i.id));
 
@@ -489,11 +489,11 @@ async function speechBlob(text, voice) {
   try { cache && await cache.put(key, new Response(blob, { headers: { "content-type": "audio/mpeg" } })); } catch { /* storage full or blocked: fine */ }
   return blob;
 }
-async function speakText(text) {
+async function speakText(text, { device = false } = {}) {
   stopSpeech();
-  const clean = String(text || "").replace(/\s+/g, " ").trim().slice(0, 400);
+  const clean = String(text || "").replace(/\s+/g, " ").trim().slice(0, device ? 2000 : 400);
   if (!clean) return;
-  if (cloud.signedIn && speechCloudOk) {
+  if (!device && cloud.signedIn && speechCloudOk) {
     try {
       const url = URL.createObjectURL(await speechBlob(clean, (state.settings && state.settings.voice) || "athena"));
       const a = new Audio(url);
@@ -508,18 +508,71 @@ async function speakText(text) {
   }
   deviceSpeak(clean);
 }
-function speakBtn(text, label = "🔊") {
+function speakBtn(text, label = "🔊", opts = {}) {
   const b = h("button", { type: "button", class: "ghost small", "aria-label": "Read it aloud", title: "Read it aloud" }, label);
-  b.onclick = async () => { b.disabled = true; b.textContent = "⏳"; try { await speakText(text); } finally { b.disabled = false; b.textContent = label; } };
+  b.onclick = async () => { b.disabled = true; b.textContent = "⏳"; try { await speakText(text, opts); } finally { b.disabled = false; b.textContent = label; } };
   return b;
 }
 
-const quoteUI = { text: "", who: "", why: "", subjectId: "", filter: "all", prompt: "", listSubjectId: "", listTopic: "", listCount: 10, listPrompt: "", paste: "", preview: null, quiz: null, quizSubject: "all", quizCount: 10 };
+const askUI = { subjectId: "", topic: "", question: "", busy: false, log: [], error: "", prompt: "" };
+const ASK_IDEAS = ["Explain it in simple words", "Why does this happen?", "Give me an example", "What do I need to know for the exam?", "What's the difference between …?"];
+async function askNow() {
+  const question = askUI.question.trim();
+  if (question.length < 3) { toast("Type your question first."); return; }
+  const subject = (state.subjects.find((x) => x.id === askUI.subjectId) || {}).name || "";
+  askUI.busy = true; askUI.error = ""; render();
+  try {
+    const res = await cloud.askQuestion({ question, subject, topic: askUI.topic.trim(), board: askUI.subjectId ? L.boardForSubject(state.settings, askUI.subjectId) : (state.settings.board || "") });
+    askUI.log.unshift({ q: question, a: res.answer, subject, ai: true });
+    askUI.question = "";
+  } catch (e) {
+    askUI.error = (e && e.message) || "Ask had a problem. Try again.";
+  }
+  askUI.busy = false; render();
+}
+async function copyAskPrompt() {
+  const question = askUI.question.trim();
+  if (question.length < 3) { toast("Type your question first."); return; }
+  const subject = (state.subjects.find((x) => x.id === askUI.subjectId) || {}).name || "";
+  const board = askUI.subjectId ? L.boardForSubject(state.settings, askUI.subjectId) : "";
+  askUI.prompt = `I'm a UK GCSE student revising${subject ? " " + subject : ""}${board && board !== "Any exam board" ? " (" + board + ")" : ""}${askUI.topic.trim() ? ", topic: " + askUI.topic.trim() : ""}.\n\nMy question: ${question}\n\nPlease explain it in plain words I can understand, with a simple example, in under 170 words. If you aren't sure about something, say so.`;
+  let copied = false;
+  try { await navigator.clipboard.writeText(askUI.prompt); copied = true; } catch { copied = false; }
+  toast(copied ? "Prompt copied — paste it into another AI ✓" : "Copy the prompt from the box below.");
+  render();
+}
+function viewAsk() {
+  const signed = cloud.signedIn;
+  return h("div", {},
+    h("section", { class: "card" },
+      h("h2", {}, "💡 Ask a question"),
+      h("p", { class: "muted small" }, "Ask anything about a topic and get a plain-English answer. No quiz, no points, no pressure — just understanding."),
+      h("label", {}, "Subject (optional)", h("select", { "aria-label": "Subject to ask about", onchange: (e) => { askUI.subjectId = e.target.value; } }, [h("option", { value: "", selected: !askUI.subjectId }, "Any subject"), ...state.subjects.map((x) => h("option", { value: x.id, selected: askUI.subjectId === x.id }, x.name))])),
+      h("label", {}, "Topic (optional)", h("input", { type: "text", "aria-label": "Topic", placeholder: "e.g. Photosynthesis, Quadratic equations", value: askUI.topic, oninput: (e) => { askUI.topic = e.target.value; } })),
+      h("label", {}, "Your question", h("textarea", { "aria-label": "Your question", style: "min-height:5rem", placeholder: "e.g. Why do plants need chlorophyll?", oninput: (e) => { askUI.question = e.target.value; } }, askUI.question)),
+      h("div", { class: "row", style: "flex-wrap:wrap;margin:.4rem 0" }, ...ASK_IDEAS.map((t) => h("button", { type: "button", class: "ghost small", onclick: () => { askUI.question = (askUI.question.trim() ? askUI.question.trim() + " " : "") + t; render(); } }, t))),
+      h("div", { class: "row", style: "margin-top:.4rem" },
+        h("button", { class: "primary", disabled: askUI.busy || !signed, onclick: askNow }, askUI.busy ? "Thinking…" : "Ask"),
+        h("button", { onclick: copyAskPrompt }, "Copy a prompt for another AI")),
+      !signed && h("p", { class: "small muted", style: "margin:.6rem 0 0" }, "Sign in to ask the AI inside Revise. You can still copy a prompt and ask another AI (like ChatGPT or Gemini)."),
+      askUI.error && h("p", { class: "verdict bad", style: "margin:.6rem 0 0" }, askUI.error),
+      askUI.prompt && h("label", { style: "margin-top:.8rem" }, "Prompt to copy", h("textarea", { readonly: true, style: "min-height:8rem", onfocus: (e) => e.target.select?.() }, askUI.prompt)),
+      h("p", { class: "small muted", style: "margin:.6rem 0 0" }, "⚠️ AI can get things wrong. Check important facts against your notes or textbook. Each answer uses a little of your free daily AI allowance.")),
+    askUI.log.length > 0 && h("section", { class: "card" },
+      h("h2", {}, "Answers"),
+      ...askUI.log.map((x) => h("div", { class: "card", style: "margin:.6rem 0;padding:.8rem" },
+        h("p", { class: "small muted", style: "margin:0 0 .3rem" }, x.subject ? `${x.subject} · you asked:` : "You asked:"),
+        h("p", { style: "margin:0 0 .6rem;font-weight:600" }, x.q),
+        h("p", { style: "margin:0;white-space:pre-wrap;line-height:1.5" }, x.a),
+        h("div", { class: "row", style: "margin-top:.6rem" }, speakBtn(x.a, "🔊 Read it to me", { device: true }))))));
+}
+
+const quoteUI = { text: "", who: "", why: "", subjectId: "", filter: "all", prompt: "", listSubjectId: "", listTopic: "", listCount: 10, listPrompt: "", paste: "", preview: null, quiz: null, learn: null, now: "", quizSubject: "all", quizCount: 10 };
 function addQuote() {
   const text = quoteUI.text.trim();
   if (!text) { toast("Type the quote first."); return; }
   state.quotes = state.quotes || [];
-  state.quotes.unshift({ id: L.uid(), text: text.slice(0, 600), who: quoteUI.who.trim().slice(0, 120), why: quoteUI.why.trim().slice(0, 600), subjectId: quoteUI.subjectId, date: today(), box: 1, due: today(), right: 0, wrong: 0 });
+  state.quotes.unshift({ id: L.uid(), text: text.replace(/^["“”]+\s*|\s*["“”]+$/g, "").slice(0, 600), who: quoteUI.who.trim().slice(0, 120), why: quoteUI.why.trim().slice(0, 600), subjectId: quoteUI.subjectId, date: today(), box: 1, due: today(), right: 0, wrong: 0 });
   quoteUI.text = ""; quoteUI.who = ""; quoteUI.why = ""; quoteUI.prompt = "";
   save(); render(); toast("Quote saved ✓");
 }
@@ -555,24 +608,63 @@ async function copyQuotePrompt() {
   render();
 }
 
-// ---- Quotes quiz: fill in the missing words, or say who said it. Uses the same "come back sooner if wrong" boxes as questions.
+// ---- Quotes: learn first, then a quiz that uses spaced repetition, retries misses and makes you write them out.
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+function quotePool() {
+  return (state.quotes || []).filter((x) => quoteUI.quizSubject === "all" || x.subjectId === quoteUI.quizSubject);
+}
+function startQuoteLearn() {
+  const pool = quotePool().slice(0, quoteUI.quizCount);
+  if (!pool.length) { toast("Add some quotes first."); return; }
+  quoteUI.learn = { ids: pool.map((x) => x.id), index: 0, cover: null };
+  render();
+}
+function quoteLearnView() {
+  const z = quoteUI.learn;
+  const q = (state.quotes || []).find((x) => x.id === z.ids[z.index]);
+  if (!q) { quoteUI.learn = null; return viewQuotes(); }
+  const total = z.ids.length;
+  const last = z.index === total - 1;
+  if (z.cover === null) z.cover = false;
+  const line = h("p", { style: "font-size:1.25rem;line-height:1.7;font-style:italic;margin:.6rem 0" });
+  if (z.cover) {
+    if (!z.parts || z.partsFor !== q.id) { z.parts = L.makeBlanks(q.text, Math.random, 3); z.partsFor = q.id; }
+    for (const part of z.parts) line.append(part.blank ? h("span", { style: "border-bottom:2px solid currentColor;display:inline-block;min-width:2.2ch;text-align:center;color:transparent" }, part.t) : part.t);
+  } else line.append(`“${q.text}”`);
+  return h("section", { class: "card" },
+    h("div", { class: "row", style: "justify-content:space-between;align-items:center" },
+      h("h2", { style: "margin:0" }, `📖 Learn ${z.index + 1} of ${total}`),
+      h("button", { class: "ghost small", onclick: () => { stopSpeech(); quoteUI.learn = null; render(); } }, "⏹ Stop")),
+    h("p", { class: "muted small" }, "Read it, say it out loud, then cover some words and try to say it again from memory."),
+    line,
+    q.who && h("p", { class: "small", style: "margin:.15rem 0" }, h("strong", {}, "Who says it: "), q.who),
+    q.why && h("p", { class: "small", style: "margin:.15rem 0" }, h("strong", {}, "Why it's useful: "), q.why),
+    h("div", { class: "row", style: "margin:.8rem 0" }, speakBtn(q.text, "🔊 Hear it"),
+      h("button", { class: "ghost", onclick: () => { z.cover = !z.cover; z.parts = null; render(); } }, z.cover ? "👀 Show all the words" : "🙈 Hide some words")),
+    h("div", { class: "row", style: "justify-content:space-between" },
+      h("button", { onclick: () => { stopSpeech(); if (z.index > 0) { z.index--; z.cover = false; z.parts = null; render(); } } }, "← Back"),
+      last ? h("button", { class: "primary", onclick: () => { stopSpeech(); quoteUI.learn = null; startQuoteQuiz(); } }, "Test me on these →")
+        : h("button", { class: "primary", onclick: () => { stopSpeech(); z.index++; z.cover = false; z.parts = null; render(); } }, "Next →")));
+}
+
 function startQuoteQuiz() {
   const { picked } = L.pickQuotes(state.quotes || [], { subjectId: quoteUI.quizSubject, count: quoteUI.quizCount, today: today() });
   if (!picked.length) { toast("Add some quotes first."); return; }
   const speakers = new Set((state.quotes || []).map((x) => L.speakerName(x.who)).filter(Boolean));
   const queue = picked.map((x) => {
     const canWho = Boolean(L.speakerName(x.who));
-    const type = canWho && Math.random() < 0.4 ? "who" : "blank";
+    const box = x.box || 1;
+    const type = box >= 3 && Math.random() < 0.6 ? "recall" : canWho && Math.random() < 0.4 ? "who" : "blank";
     const item = { id: x.id, type };
-    if (type === "blank") item.parts = L.makeBlanks(x.text, Math.random, Math.min(3, x.box || 1));
-    else {
+    if (type === "blank") item.parts = L.makeBlanks(x.text, Math.random, Math.min(3, box));
+    else if (type === "who") {
       const right = L.speakerName(x.who);
       const others = L.shuffle([...speakers].filter((n) => n.toLowerCase() !== right.toLowerCase()));
       item.options = others.length >= 2 ? L.shuffle([right, ...others.slice(0, 3)]) : null;
     }
     return item;
   });
-  quoteUI.quiz = { queue, index: 0, stage: "ask", ok: false, given: [], right: 0, points: 0, combo: 0 };
+  quoteUI.quiz = { queue, index: 0, stage: "ask", ok: false, given: [], right: 0, points: 0, combo: 0, hint: false, copied: null };
   render();
 }
 function answerQuoteQuiz(given) {
@@ -581,25 +673,29 @@ function answerQuoteQuiz(given) {
   const q = (state.quotes || []).find((x) => x.id === item.id);
   if (!q) return;
   let ok;
-  if (item.type === "blank") {
-    const hidden = item.parts.filter((x) => x.blank);
-    ok = hidden.every((x, i) => L.isCorrect(String(given[i] || ""), x.t));
-    z.given = given;
-  } else { ok = L.isCorrectSpeaker(given[0], q.who); z.given = given; }
-  const t = today(), s = state.stats;
-  const next = L.schedule(q, ok, t);
-  q.box = next.box; q.due = next.due;
-  if (ok) q.right = (q.right || 0) + 1; else q.wrong = (q.wrong || 0) + 1;
-  s.answered++;
-  if (ok) s.correct++;
-  Object.assign(s, L.updateStreak(s, t));
-  if (!s.days[t]) s.days[t] = { n: 0, c: 0, p: 0 };
-  s.days[t].n++;
-  if (ok) {
-    const pts = L.pointsFor(z.combo);
-    s.points += pts; s.days[t].p += pts; s.days[t].c++; z.points += pts; z.combo++; z.right++;
-  } else z.combo = 0;
-  z.ok = ok; z.stage = "feedback";
+  if (item.type === "blank") ok = item.parts.filter((x) => x.blank).every((x, i) => L.isCorrect(String(given[i] || ""), x.t));
+  else if (item.type === "recall") ok = L.quoteSimilarity(given[0], q.text) >= 0.85;
+  else ok = L.isCorrectSpeaker(given[0], q.who);
+  z.given = given;
+  if (!item.retry) {
+    const t = today(), s = state.stats;
+    const next = L.schedule(q, ok, t);
+    q.box = next.box; q.due = next.due;
+    if (ok) q.right = (q.right || 0) + 1; else q.wrong = (q.wrong || 0) + 1;
+    s.answered++;
+    if (ok) s.correct++;
+    Object.assign(s, L.updateStreak(s, t));
+    if (!s.days[t]) s.days[t] = { n: 0, c: 0, p: 0 };
+    s.days[t].n++;
+    if (ok) {
+      const pts = L.pointsFor(z.combo);
+      s.points += pts; s.days[t].p += pts; s.days[t].c++; z.points += pts; z.combo++; z.right++;
+    } else {
+      z.combo = 0;
+      z.queue.push({ id: q.id, type: "blank", retry: true, parts: L.makeBlanks(q.text, Math.random, 1) }); // ask it again at the end
+    }
+  }
+  z.ok = ok; z.stage = "feedback"; z.copied = null;
   save(); playResultSound(); render();
 }
 function quoteQuizView() {
@@ -608,19 +704,26 @@ function quoteQuizView() {
   if (z.index >= total) {
     return h("section", { class: "card" },
       h("h2", {}, "Quotes quiz finished 🎉"),
-      h("p", { class: "verdict good" }, `You got ${z.right} of ${total} right and earned ${z.points} points.`),
-      h("p", { class: "muted small" }, "Quotes you missed will come back sooner; the ones you knew will come back later."),
+      h("p", { class: "verdict good" }, `You got ${z.right} of ${z.queue.filter((x) => !x.retry).length} right first time and earned ${z.points} points.`),
+      h("p", { class: "muted small" }, "Quotes you missed will come back sooner; the ones you knew will come back later and get harder (recalling the whole quote)."),
       h("button", { class: "primary", onclick: () => { quoteUI.quiz = null; render(); } }, "Done"));
   }
   const item = z.queue[z.index];
   const q = (state.quotes || []).find((x) => x.id === item.id);
   const head = h("div", { class: "row", style: "justify-content:space-between;align-items:center" },
-    h("h2", { style: "margin:0" }, `Quote ${z.index + 1} of ${total}`),
+    h("h2", { style: "margin:0" }, item.retry ? `Try again · ${z.index + 1} of ${total}` : `Quote ${z.index + 1} of ${total}`),
     h("button", { class: "ghost small", onclick: () => { stopSpeech(); quoteUI.quiz = null; render(); } }, "⏹ Stop"));
   if (!q) { z.index++; return quoteQuizView(); }
-  const inputs = [];
+  const next = () => { stopSpeech(); z.index++; z.stage = "ask"; z.hint = false; render(); };
   if (z.stage === "feedback") {
     const hiddenAns = item.type === "blank" ? item.parts.filter((x) => x.blank).map((x) => x.t) : [];
+    const box = [];
+    if (!z.ok) {
+      const ta = h("textarea", { "aria-label": "Write the quote out", style: "min-height:4rem", placeholder: "Look at it, then type it out…" });
+      const msg = h("p", { class: "small", style: "margin:.3rem 0" }, z.copied ? "✅ Locked in!" : "");
+      box.push(h("p", { class: "small", style: "margin:.8rem 0 .2rem" }, h("strong", {}, "✍️ Write it out once to lock it in")), ta, msg,
+        h("button", { class: "ghost", onclick: () => { const ok = L.quoteSimilarity(ta.value, q.text) >= 0.85; z.copied = ok; msg.textContent = ok ? "✅ Locked in!" : "Not quite — look at it again and have another go."; } }, "Check what I wrote"));
+    }
     return h("section", { class: "card" }, head,
       h("p", { class: "verdict " + (z.ok ? "good" : "bad") }, z.ok ? "✅ Right!" : "❌ Not quite."),
       item.type === "blank" && !z.ok && h("p", { class: "small" }, `The missing words were: ${hiddenAns.join(", ")}.`),
@@ -628,22 +731,37 @@ function quoteQuizView() {
       h("p", { style: "font-size:1.1rem;font-style:italic;margin:.6rem 0" }, `“${q.text}”`),
       q.who && h("p", { class: "small", style: "margin:.15rem 0" }, h("strong", {}, "Who says it: "), q.who),
       q.why && h("p", { class: "small", style: "margin:.15rem 0" }, h("strong", {}, "Why it's useful: "), q.why),
+      ...box,
       h("div", { class: "row", style: "margin-top:.8rem" }, speakBtn(q.text, "🔊 Hear it"),
-        h("button", { class: "primary", onclick: () => { stopSpeech(); z.index++; z.stage = "ask"; render(); } }, z.index + 1 >= total ? "Finish" : "Next →")));
+        h("button", { class: "primary", onclick: next }, z.index + 1 >= total ? "Finish" : "Next →")));
   }
   if (item.type === "blank") {
+    const hidden = item.parts.filter((x) => x.blank);
+    const inputs = [];
     const line = h("p", { style: "font-size:1.15rem;line-height:2.2;font-style:italic" });
     let n = 0;
     for (const part of item.parts) {
       if (!part.blank) { line.append(part.t); continue; }
       const i = n++;
-      const inp = h("input", { type: "text", "aria-label": `Missing word ${i + 1}`, autocomplete: "off", autocapitalize: "off", style: `width:${Math.max(5, part.t.length + 2)}ch;min-height:0;display:inline-block;margin:0 .15rem;padding:.1rem .3rem;text-align:center` });
+      const inp = h("input", { type: "text", "aria-label": `Missing word ${i + 1}`, autocomplete: "off", autocapitalize: "off", placeholder: z.hint ? part.t[0] + "…" : "", style: `width:${Math.max(5, part.t.length + 2)}ch;min-height:0;display:inline-block;margin:0 .15rem;padding:.1rem .3rem;text-align:center` });
       inputs.push(inp); line.append(inp);
     }
-    const submit = () => answerQuoteQuiz(inputs.map((x) => x.value));
     return h("section", { class: "card" }, head,
       h("p", { class: "muted small" }, "Fill in the missing words."), line,
-      h("div", { class: "row" }, h("button", { class: "primary", onclick: submit }, "Check"), h("button", { class: "ghost", onclick: () => answerQuoteQuiz(inputs.map(() => "")) }, "I don't know")));
+      h("div", { class: "row" }, h("button", { class: "primary", onclick: () => answerQuoteQuiz(inputs.map((x) => x.value)) }, "Check"),
+        !z.hint && hidden.length > 0 && h("button", { class: "ghost", onclick: () => { z.hint = true; render(); } }, "💡 First letters"),
+        h("button", { class: "ghost", onclick: () => answerQuoteQuiz(inputs.map(() => "")) }, "I don't know")));
+  }
+  if (item.type === "recall") {
+    const ta = h("textarea", { "aria-label": "Type the whole quote", style: "min-height:5rem", placeholder: "Type the whole quote from memory…" });
+    const words = q.text.split(/\s+/);
+    return h("section", { class: "card" }, head,
+      h("p", { class: "muted small" }, `Type the whole quote from memory.${q.who ? ` It's said by ${L.speakerName(q.who)}.` : ""}`),
+      h("p", { style: "font-size:1.15rem;letter-spacing:.06em;font-family:monospace" }, z.hint ? `${words.slice(0, Math.min(4, Math.ceil(words.length / 3))).join(" ")} …` : L.firstLetters(q.text)),
+      ta,
+      h("div", { class: "row", style: "margin-top:.5rem" }, h("button", { class: "primary", onclick: () => answerQuoteQuiz([ta.value]) }, "Check"),
+        !z.hint && h("button", { class: "ghost", onclick: () => { z.hint = true; render(); } }, "💡 Show the first words"),
+        h("button", { class: "ghost", onclick: () => answerQuoteQuiz([""]) }, "I don't know")));
   }
   const body = [h("p", { style: "font-size:1.15rem;font-style:italic" }, `“${q.text}”`), h("p", { class: "muted small" }, "Who says this?")];
   if (item.options) body.push(h("div", {}, ...item.options.map((o) => h("button", { type: "button", style: "display:block;width:100%;text-align:left;margin:.3rem 0", onclick: () => answerQuoteQuiz([o]) }, o))));
@@ -654,8 +772,120 @@ function quoteQuizView() {
   return h("section", { class: "card" }, head, ...body);
 }
 
+// ---- Listen to all quotes, or hear them as a chant over a beat.
+const playAll = { token: 0, ctx: null, timer: 0 };
+function setNow(text) {
+  quoteUI.now = text;
+  const el = document.getElementById("qa-now");
+  if (el) el.textContent = text;
+}
+function speakAsync(text, { ai = false, pitch = 1, rate = 0.92 } = {}) {
+  const device = () => new Promise((resolve) => {
+    if (!window.speechSynthesis || typeof SpeechSynthesisUtterance === "undefined") { toast("This device can't read aloud."); return resolve(false); }
+    const u = new SpeechSynthesisUtterance(text.replace(/([,;:—–])\s*/g, "$1 "));
+    const v = bestDeviceVoice();
+    if (v) { u.voice = v; u.lang = v.lang; } else u.lang = "en-GB";
+    u.pitch = pitch; u.rate = rate;
+    const done = () => { clearTimeout(t); resolve(true); };
+    const t = setTimeout(done, text.length * 140 + 4000);
+    u.onend = done; u.onerror = done;
+    window.speechSynthesis.speak(u);
+  });
+  if (ai && cloud.signedIn && speechCloudOk) {
+    return (async () => {
+      try {
+        const url = URL.createObjectURL(await speechBlob(text, (state.settings && state.settings.voice) || "athena"));
+        await new Promise((resolve, reject) => { const a = new Audio(url); speechAudio = a; a.onended = () => { URL.revokeObjectURL(url); resolve(); }; a.onerror = reject; a.play().catch(reject); });
+        return true;
+      } catch { speechCloudOk = false; toast("The AI voice isn't available — using your device's voice."); return device(); }
+    })();
+  }
+  return device();
+}
+function stopBeat() {
+  clearInterval(playAll.timer); playAll.timer = 0;
+  if (playAll.ctx) { try { playAll.ctx.close(); } catch { /* ignore */ } playAll.ctx = null; }
+}
+function stopPlayAll() {
+  playAll.token++;
+  stopSpeech(); stopBeat();
+  setNow("");
+  const b = document.getElementById("qa-stop"); if (b) b.hidden = true;
+}
+async function playAllQuotes({ withWho, ai }) {
+  const list = quotePool();
+  if (!list.length) { toast("Add some quotes first."); return; }
+  stopPlayAll();
+  const me = ++playAll.token;
+  const stopBtn = document.getElementById("qa-stop"); if (stopBtn) stopBtn.hidden = false;
+  for (let i = 0; i < list.length; i++) {
+    if (me !== playAll.token) return;
+    const q = list[i];
+    setNow(`Playing ${i + 1} of ${list.length}: “${q.text}”`);
+    await speakAsync(q.text, { ai });
+    if (me !== playAll.token) return;
+    if (withWho && q.who) await speakAsync(`${L.speakerName(q.who)}.`, { ai });
+    await sleep(700);
+  }
+  if (me === playAll.token) { setNow("Finished ✓"); if (stopBtn) stopBtn.hidden = true; }
+}
+// A simple backing beat made in the browser (no files, no AI): kick, snare, hi-hat, bass and a little chord pattern.
+function startBeat() {
+  const AC = window.AudioContext || window.webkitAudioContext;
+  if (!AC) return null;
+  const ctx = new AC();
+  playAll.ctx = ctx;
+  const bpm = 88, step = 60 / bpm / 4; // sixteenth note
+  const master = ctx.createGain(); master.gain.value = 0.32; master.connect(ctx.destination);
+  const noise = ctx.createBuffer(1, ctx.sampleRate * 0.3, ctx.sampleRate);
+  const nd = noise.getChannelData(0); for (let i = 0; i < nd.length; i++) nd[i] = Math.random() * 2 - 1;
+  const tone = (type, f0, f1, t, dur, vol) => { const o = ctx.createOscillator(), g = ctx.createGain(); o.type = type; o.frequency.setValueAtTime(f0, t); if (f1) o.frequency.exponentialRampToValueAtTime(f1, t + dur); g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.001, t + dur); o.connect(g); g.connect(master); o.start(t); o.stop(t + dur + 0.02); };
+  const hit = (t, dur, vol, hp) => { const src = ctx.createBufferSource(); src.buffer = noise; const f = ctx.createBiquadFilter(); f.type = "highpass"; f.frequency.value = hp; const g = ctx.createGain(); g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.001, t + dur); src.connect(f); f.connect(g); g.connect(master); src.start(t); src.stop(t + dur + 0.02); };
+  const chords = [[220, 261.63, 329.63], [174.61, 220, 261.63], [261.63, 329.63, 392], [196, 246.94, 293.66]]; // Am F C G
+  const roots = [110, 87.31, 130.81, 98];
+  let n = 0, next = ctx.currentTime + 0.1;
+  const start = next;
+  const schedule = () => {
+    while (next < ctx.currentTime + 0.25) {
+      const s = n % 16, bar = Math.floor(n / 16) % 4;
+      if (s === 0 || s === 8 || s === 10) tone("sine", 150, 45, next, 0.22, 0.9);
+      if (s === 4 || s === 12) hit(next, 0.16, 0.45, 1500);
+      if (s % 2 === 0) hit(next, 0.04, 0.12, 7000);
+      if (s === 0 || s === 6 || s === 8 || s === 14) tone("triangle", roots[bar], 0, next, step * 3, 0.5);
+      if (s % 4 === 2) tone("triangle", chords[bar][(s / 4 | 0) % 3] * 2, 0, next, step * 2.5, 0.12);
+      next += step; n++;
+    }
+  };
+  schedule(); playAll.timer = setInterval(schedule, 60);
+  const barLen = step * 16;
+  return { ctx, nextBar: () => { const t = ctx.currentTime; return Math.max(0, start + Math.ceil((t - start) / barLen + 0.02) * barLen - t); } };
+}
+async function playSong({ withWho }) {
+  const list = quotePool();
+  if (!list.length) { toast("Add some quotes first."); return; }
+  stopPlayAll();
+  const me = ++playAll.token;
+  const beat = startBeat();
+  if (!beat) { toast("This device can't play the beat."); return; }
+  const stopBtn = document.getElementById("qa-stop"); if (stopBtn) stopBtn.hidden = false;
+  await sleep(beat.nextBar() * 1000);
+  for (let i = 0; i < list.length; i++) {
+    const q = list[i];
+    for (let rep = 0; rep < 2; rep++) {
+      if (me !== playAll.token) return;
+      setNow(`🎵 ${i + 1} of ${list.length}${rep ? " (again)" : ""}: “${q.text}”`);
+      await speakAsync(q.text, { pitch: rep ? 1.35 : 1.2, rate: rep ? 0.78 : 0.82 });
+      if (rep && withWho && q.who) await speakAsync(`${L.speakerName(q.who)}.`, { pitch: 1.1, rate: 0.85 });
+      if (me !== playAll.token) return;
+      await sleep(beat.nextBar() * 1000);
+    }
+  }
+  if (me === playAll.token) { await sleep(beat.nextBar() * 1000); stopBeat(); setNow("Finished ✓"); if (stopBtn) stopBtn.hidden = true; }
+}
+
 function viewQuotes() {
   if (quoteUI.quiz) return quoteQuizView();
+  if (quoteUI.learn) return quoteLearnView();
   const all = state.quotes || [];
   const shown = quoteUI.filter === "all" ? all : all.filter((x) => x.subjectId === quoteUI.filter);
   const subjOpts = (cur, first) => [h("option", { value: "", selected: !cur }, first), ...state.subjects.map((x) => h("option", { value: x.id, selected: cur === x.id }, x.name))];
@@ -679,9 +909,20 @@ function viewQuotes() {
       h("div", { class: "row" },
         h("label", { style: "flex:1" }, "Subject", h("select", { "aria-label": "Quiz subject", onchange: (e) => { quoteUI.quizSubject = e.target.value; } }, [h("option", { value: "all", selected: quoteUI.quizSubject === "all" }, "All quotes"), ...state.subjects.map((x) => h("option", { value: x.id, selected: quoteUI.quizSubject === x.id }, x.name))])),
         h("label", { style: "flex:1" }, "How many", h("select", { "aria-label": "Quiz length", onchange: (e) => { quoteUI.quizCount = Number(e.target.value); } }, [5, 10, 20, 50].map((n) => h("option", { value: n, selected: quoteUI.quizCount === n }, String(n)))))),
-      h("button", { class: "primary", style: "margin-top:.6rem", onclick: startQuoteQuiz }, "Start quiz")),
+      h("div", { class: "row", style: "margin-top:.6rem" }, h("button", { onclick: startQuoteLearn }, "📖 Learn them first"), h("button", { class: "primary", onclick: startQuoteQuiz }, "Start quiz"))),
     h("label", { style: "margin-top:.8rem" }, "🔊 Reading voice", h("select", { "aria-label": "Reading voice", onchange: (e) => { state.settings.voice = e.target.value; save(); } }, L.VOICES.map(([id, name]) => h("option", { value: id, selected: state.settings.voice === id }, name)))),
     h("p", { class: "small muted", style: "margin:.4rem 0 0" }, "Press 🔊 on any quote to hear it. The AI voice needs you to be signed in, uses a little of your free daily AI allowance the first time, then is saved on this device. Otherwise your device's own voice is used."));
+  const listenCard = all.length === 0 ? null : h("section", { class: "card" },
+    h("h2", {}, "🎧 Listen to your quotes"),
+    h("p", { class: "muted small" }, `Hear ${quoteUI.quizSubject === "all" ? "all" : "this subject's"} quotes one after another (uses the subject picked in the quiz box). Great for going over them while you tidy your room or walk.`),
+    h("label", { class: "row", style: "align-items:center;gap:.5rem" }, h("input", { type: "checkbox", id: "qa-who", checked: true, style: "width:auto;min-height:0" }), "Also say who says each one"),
+    h("label", { class: "row", style: "align-items:center;gap:.5rem" }, h("input", { type: "checkbox", id: "qa-ai", style: "width:auto;min-height:0" }), "Use the AI voice (sounds nicer, but uses your free daily AI allowance)"),
+    h("div", { class: "row", style: "margin-top:.6rem" },
+      h("button", { class: "primary", onclick: () => playAllQuotes({ withWho: document.getElementById("qa-who").checked, ai: document.getElementById("qa-ai").checked }) }, "▶ Read all my quotes"),
+      h("button", { onclick: () => playSong({ withWho: document.getElementById("qa-who").checked }) }, "🎵 Turn them into a song")),
+    h("button", { id: "qa-stop", class: "ghost", style: "margin-top:.5rem", hidden: true, onclick: stopPlayAll }, "⏹ Stop"),
+    h("p", { id: "qa-now", class: "small", style: "margin:.6rem 0 0;font-style:italic" }, quoteUI.now || ""),
+    h("p", { class: "small muted", style: "margin:.4rem 0 0" }, "The song is a chant: your quotes spoken twice, in a sing-song voice, over a beat made on your device. Free AI can't properly sing, so it won't sound like a real singer, but the rhythm really helps you remember."));
   const pv = quoteUI.preview;
   const listCard = h("section", { class: "card" },
     h("h2", {}, "✨ Paste a list from another AI (easiest)"),
@@ -711,7 +952,7 @@ function viewQuotes() {
         sub && h("p", { class: "small muted", style: "margin:.15rem 0" }, sub),
         h("div", { class: "row", style: "margin-top:.4rem" }, speakBtn(x.text, "🔊 Hear it"), h("button", { class: "ghost small", onclick: () => { state.quotes = state.quotes.filter((y) => y.id !== x.id); save(); render(); } }, "Delete")));
     }));
-  return h("div", {}, listCard, quizCard, form, list);
+  return h("div", {}, listCard, quizCard, listenCard, form, list);
 }
 
 function viewPlan() {
@@ -991,7 +1232,7 @@ function render() {
   let view;
   if (booting) view = h("p", { class: "muted" }, "Loading…");
   else if (!state) view = viewAuth();
-  else view = { home: viewHome, revise: viewRevise, questions: viewQuestions, quotes: viewQuotes, rewards: viewRewards, farm: viewFarm, plan: viewPlan }[tab]();
+  else view = { home: viewHome, revise: viewRevise, questions: viewQuestions, ask: viewAsk, quotes: viewQuotes, rewards: viewRewards, farm: viewFarm, plan: viewPlan }[tab]();
   app.replaceChildren(...[
     inApp && !storageOk && h("div", { class: "banner", role: "alert" }, "This browser isn't letting the app save on this device. " + (cloud.signedIn ? "Your account copy is still saved." : "Your progress will be lost when you close the page — try turning off private browsing.")),
     view,

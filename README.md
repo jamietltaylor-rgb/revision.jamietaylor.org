@@ -79,3 +79,6 @@ A guided tour (public/tutorial.js) opens for brand-new accounts and is always av
 
 ## Reading aloud
 `/api/speak` reads quotes with Workers AI (Deepgram Aura, @cf/deepgram/aura-1). It needs the AI binding and a sign-in. Clips are cached on each device; without the AI voice the device's own voice is used. Note Aura is a partner model billed per character, so it may not be on the free plan; the app falls back to the device voice if so.
+
+## Ask, quote learning and listening
+`/api/ask` answers a student's own question (Workers AI, free allowance, sign-in needed). The Quotes tab has Learn mode, a quiz that retries misses and asks for the whole quote from memory, Read-all and a chant-over-a-beat "song" (made in the browser with the Web Audio and speech APIs; no AI needed unless "Use the AI voice" is ticked).

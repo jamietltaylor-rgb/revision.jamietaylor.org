@@ -208,6 +208,23 @@ export function createCloud(config, { fetchFn = (...a) => globalThis.fetch(...a)
     return json;
   }
 
+  /** Answers a student's own question about a topic (no quiz). */
+  async function askQuestion(request) {
+    const token = await freshToken();
+    const url = config.askEndpoint || String(config.aiEndpoint || "/api/generate").replace(/generate$/, "ask");
+    let res;
+    try {
+      res = await fetchFn(url, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify(request) });
+    } catch {
+      throw new CloudError("Can't reach the server — check your internet connection.", "offline");
+    }
+    let json = null;
+    try { json = await res.json(); } catch { json = null; }
+    if (res.status === 404 || res.status === 405) throw new CloudError("Ask isn't switched on yet.", "not_installed");
+    if (!res.ok || !json || typeof json.answer !== "string") throw new CloudError((json && json.error) || "Ask had a problem.", String(res.status));
+    return json;
+  }
+
   /** Asks the server to read some text aloud. Returns an audio Blob (MP3). */
   async function speak(text, speaker) {
     const token = await freshToken();
@@ -233,6 +250,6 @@ export function createCloud(config, { fetchFn = (...a) => globalThis.fetch(...a)
     enabled,
     get user() { return session ? session.user : null; },
     get signedIn() { return Boolean(session); },
-    signUp, signIn, signOut, restore, loadData, saveData, generate, markAnswer, checkAnswer, explainAnswer, speak,
+    signUp, signIn, signOut, restore, loadData, saveData, generate, markAnswer, checkAnswer, explainAnswer, askQuestion, speak,
   };
 }

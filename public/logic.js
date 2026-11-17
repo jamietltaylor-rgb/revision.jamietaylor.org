@@ -1264,6 +1264,19 @@ export function pickQuotes(quotes, { subjectId = "all", count = 10, today, rand 
   return { picked: ranked.slice(0, count), dueCount: pool.filter(isDue).length };
 }
 
+/** How closely `typed` matches `target`, as 0-1 (word by word, in order). */
+export function quoteSimilarity(typed, target) {
+  const words = (x) => String(x || "").toLowerCase().replace(/[^\p{L}\p{N}' ]+/gu, " ").replace(/['’]/g, "").split(/\s+/).filter(Boolean);
+  const a = words(typed), b = words(target);
+  if (!b.length) return 0;
+  const dp = Array.from({ length: a.length + 1 }, () => new Array(b.length + 1).fill(0));
+  for (let i = 1; i <= a.length; i++) for (let j = 1; j <= b.length; j++) dp[i][j] = a[i - 1] === b[j - 1] ? dp[i - 1][j - 1] + 1 : Math.max(dp[i - 1][j], dp[i][j - 1]);
+  return dp[a.length][b.length] / Math.max(a.length, b.length);
+}
+
+/** "Is this a dagger?" -> "I t a d?" (first letters, keeps the punctuation). */
+export const firstLetters = (text) => String(text || "").replace(/[\p{L}\p{N}][\p{L}\p{N}'’-]*/gu, (w) => w[0]);
+
 export function buildQuotePrompt(quote, subject = "") {
   const q = String(quote || "").trim();
   return `I'm revising${subject ? " " + subject : ""} for my exams. For this quote:\n\n"${q}"\n\n1. Who says it (and in which text, scene or source)?\n2. Why is it useful to remember — what does it show, and which exam topics or questions could I use it for?\n\nKeep each answer to one or two short sentences, and tell me if you aren't sure of the source.`;
@@ -1283,7 +1296,7 @@ export function parseQuoteList(text) {
   const push = (q, who, why) => {
     const t = String(q || "").trim().replace(/^[-*•]\s+|^\d+[.)]\s+/, "");
     if (!t) { skipped++; return; }
-    items.push({ text: t.slice(0, 600), who: String(who || "").trim().slice(0, 120), why: String(why || "").trim().slice(0, 600) });
+    items.push({ text: t.replace(/^["“”]+\s*|\s*["“”]+$/g, "").slice(0, 600), who: String(who || "").trim().slice(0, 120), why: String(why || "").trim().slice(0, 600) });
   };
   if (raw.startsWith("[")) {
     try {
