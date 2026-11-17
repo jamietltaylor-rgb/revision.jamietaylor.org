@@ -788,3 +788,10 @@ test("the sound setting defaults to on and can be switched off", () => {
   assert.equal(L.sanitiseState({ subjects: [], settings: { sound: false } }).settings.sound, false);
   assert.equal(L.sanitiseState({ subjects: [], settings: { sound: "no" } }).settings.sound, true);
 });
+
+test("quotes are kept and cleaned", () => {
+  const s = L.sanitiseState({ quotes: [{ id: "a", text: " To be ", who: "Hamlet", why: "doubt" }, { id: "b", text: "" }] });
+  assert.equal(s.quotes.length, 1);
+  assert.equal(s.quotes[0].text, "To be");
+  assert.match(L.buildQuotePrompt("x", "English"), /Who says it/);
+});

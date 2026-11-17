@@ -5,7 +5,7 @@ import { findGuide } from "./examguides.js";
 import { createCloud, displayName } from "./cloud.js";
 
 const LOCAL_KEY = "revise-app-v1"; // used when logins aren't switched on, and for progress made before accounts existed
-const TABS = [["home", "🏠", "Home"], ["revise", "📝", "Revise"], ["questions", "✏️", "Questions"], ["rewards", "🏆", "Rewards"], ["farm", "🌾", "Farm"], ["plan", "📅", "Plan"]];
+const TABS = [["home", "🏠", "Home"], ["revise", "📝", "Revise"], ["questions", "✏️", "Questions"], ["quotes", "💬", "Quotes"], ["rewards", "🏆", "Rewards"], ["farm", "🌾", "Farm"], ["plan", "📅", "Plan"]];
 const TAB_IDS = TABS.map((t) => t[0]);
 const CATALOGUE = new Set(Shop.ITEMS.map((i) => i.id));
 
@@ -455,6 +455,56 @@ function planHomeCard() {
       : h("p", { class: "small muted", style: "margin:.2rem 0 0" }, day.off ? "Today is a rest day 😴" : "Nothing planned for today."));
 }
 
+const quoteUI = { text: "", who: "", why: "", subjectId: "", filter: "all", prompt: "" };
+function addQuote() {
+  const text = quoteUI.text.trim();
+  if (!text) { toast("Type the quote first."); return; }
+  state.quotes = state.quotes || [];
+  state.quotes.unshift({ id: L.uid(), text: text.slice(0, 600), who: quoteUI.who.trim().slice(0, 120), why: quoteUI.why.trim().slice(0, 600), subjectId: quoteUI.subjectId, date: today() });
+  quoteUI.text = ""; quoteUI.who = ""; quoteUI.why = ""; quoteUI.prompt = "";
+  save(); render(); toast("Quote saved ✓");
+}
+async function copyQuotePrompt() {
+  if (!quoteUI.text.trim()) { toast("Type the quote first, then copy the prompt."); return; }
+  const sub = (state.subjects.find((x) => x.id === quoteUI.subjectId) || {}).name || "";
+  quoteUI.prompt = L.buildQuotePrompt(quoteUI.text, sub);
+  let copied = false;
+  try { await navigator.clipboard.writeText(quoteUI.prompt); copied = true; } catch { copied = false; }
+  toast(copied ? "Prompt copied — paste it into another AI ✓" : "Copy the prompt from the box below.");
+  render();
+}
+function viewQuotes() {
+  const all = state.quotes || [];
+  const shown = quoteUI.filter === "all" ? all : all.filter((x) => x.subjectId === quoteUI.filter);
+  const subjOpts = (cur, first) => [h("option", { value: "", selected: !cur }, first), ...state.subjects.map((x) => h("option", { value: x.id, selected: cur === x.id }, x.name))];
+  const form = h("section", { class: "card" },
+    h("h2", {}, "💬 Quotes to remember"),
+    h("p", { class: "muted small" }, "Save quotes you need for exams. For each one, note who says it and why it's useful, so you can use it in an answer."),
+    h("label", {}, "The quote", h("textarea", { "aria-label": "Quote", style: "min-height:4rem", placeholder: "“Is this a dagger which I see before me?”", oninput: (e) => { quoteUI.text = e.target.value; } }, quoteUI.text)),
+    h("label", {}, "Who says it", h("input", { type: "text", "aria-label": "Who says the quote", placeholder: "Macbeth, Act 2 Scene 1", value: quoteUI.who, oninput: (e) => { quoteUI.who = e.target.value; } })),
+    h("label", {}, "Why it's useful", h("textarea", { "aria-label": "Why the quote is useful", style: "min-height:3.5rem", placeholder: "Shows his guilt and growing madness — good for questions about ambition", oninput: (e) => { quoteUI.why = e.target.value; } }, quoteUI.why)),
+    h("label", {}, "Subject (optional)", h("select", { "aria-label": "Quote subject", onchange: (e) => { quoteUI.subjectId = e.target.value; } }, subjOpts(quoteUI.subjectId, "No subject"))),
+    h("div", { class: "row", style: "margin-top:.6rem" },
+      h("button", { class: "primary", onclick: addQuote }, "Save quote"),
+      h("button", { class: "ghost", onclick: copyQuotePrompt }, "Copy a prompt to find who says it & why")),
+    h("p", { class: "small muted", style: "margin:.6rem 0 0" }, "💡 Not sure who says it or why it matters? Another AI (like ChatGPT or Gemini) is the best place to ask — and always check it against your own notes or the text."),
+    quoteUI.prompt && h("label", { style: "margin-top:.8rem" }, "Prompt to copy", h("textarea", { readonly: true, style: "min-height:9rem", onfocus: (e) => e.target.select?.() }, quoteUI.prompt)));
+  const list = h("section", { class: "card" },
+    h("h2", {}, `Your quotes (${all.length})`),
+    all.length > 0 && h("label", {}, "Show", h("select", { "aria-label": "Filter quotes", onchange: (e) => { quoteUI.filter = e.target.value; render(); } }, [h("option", { value: "all", selected: quoteUI.filter === "all" }, "All subjects"), ...state.subjects.map((x) => h("option", { value: x.id, selected: quoteUI.filter === x.id }, x.name))])),
+    shown.length === 0 && h("p", { class: "muted" }, all.length ? "No quotes for this subject yet." : "No quotes yet — add your first one above."),
+    ...shown.map((x) => {
+      const sub = (state.subjects.find((s) => s.id === x.subjectId) || {}).name;
+      return h("div", { class: "card", style: "margin:.6rem 0;padding:.8rem" },
+        h("p", { style: "margin:0 0 .4rem;font-size:1.05rem;font-style:italic" }, `“${x.text.replace(/^[“"]|[”"]$/g, "")}”`),
+        h("p", { class: "small", style: "margin:.15rem 0" }, h("strong", {}, "Who says it: "), x.who || "Not added yet"),
+        h("p", { class: "small", style: "margin:.15rem 0" }, h("strong", {}, "Why it's useful: "), x.why || "Not added yet"),
+        sub && h("p", { class: "small muted", style: "margin:.15rem 0" }, sub),
+        h("button", { class: "ghost small", style: "margin-top:.4rem", onclick: () => { state.quotes = state.quotes.filter((y) => y.id !== x.id); save(); render(); } }, "Delete"));
+    }));
+  return h("div", {}, form, list);
+}
+
 function viewPlan() {
   const t = today();
   if (!planUI.month) planUI.month = t.slice(0, 7);
@@ -617,7 +667,7 @@ function render() {
   let view;
   if (booting) view = h("p", { class: "muted" }, "Loading…");
   else if (!state) view = viewAuth();
-  else view = { home: viewHome, revise: viewRevise, questions: viewQuestions, rewards: viewRewards, farm: viewFarm, plan: viewPlan }[tab]();
+  else view = { home: viewHome, revise: viewRevise, questions: viewQuestions, quotes: viewQuotes, rewards: viewRewards, farm: viewFarm, plan: viewPlan }[tab]();
   app.replaceChildren(...[
     inApp && !storageOk && h("div", { class: "banner", role: "alert" }, "This browser isn't letting the app save on this device. " + (cloud.signedIn ? "Your account copy is still saved." : "Your progress will be lost when you close the page — try turning off private browsing.")),
     view,
@@ -1573,6 +1623,7 @@ function viewQuestions() {
       cloud.enabled && h("button", { class: "primary", disabled: draft.busy, onclick: makeWithAi }, draft.busy ? (draft.progress || "Writing questions…") : "✨ Make questions for me"),
       h("button", { onclick: copyPrompt }, "Copy a prompt for another AI"),
       cloud.enabled && h("button", { class: "ghost small", onclick: checkMaker }, "Check it's set up")),
+    h("p", { class: "small", style: "margin:.6rem 0 0" }, "💡 Tip: for the best questions, use another AI (like ChatGPT or Gemini) — press “Copy a prompt for another AI”, paste it there, then paste its answer into the list box below. It saves your free daily AI allowance here too."),
     !cloud.enabled && h("p", { class: "small muted", style: "margin:.6rem 0 0" }, "Making questions inside the app needs sign-in to be switched on (see README). Until then, copy the prompt, paste it into another AI, and paste its answer below."),
     cloud.enabled && h("p", { class: "small muted", style: "margin:.6rem 0 0" }, "AI can make mistakes — check the answers against your notes before adding them."),
     draft.prompt && h("label", { style: "margin-top:.8rem" }, "Prompt to copy",

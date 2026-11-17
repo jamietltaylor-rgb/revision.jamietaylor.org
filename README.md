@@ -69,3 +69,6 @@ Then redeploy (Deployments → the latest one → Retry, or make any small commi
 ## Updating the app
 
 After changing any file in `public/`, run `node tools/stamp.mjs` before committing. It writes a version into `public/index.html` so phones fetch the new files straight away instead of showing a saved copy for up to 4 hours (the tests fail if you forget).
+
+## Quotes
+The Quotes tab saves quotes with who says them and why they are useful (optionally per subject). "Copy a prompt" gives a prompt for another AI to fill those in. The Questions tab also recommends using another AI for the best questions.

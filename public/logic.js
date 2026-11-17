@@ -1206,6 +1206,7 @@ export function emptyState() {
     questions: [],
     treats: [],
     redeemed: [],
+    quotes: [],
     settings: { dailyGoal: DEFAULT_GOAL, board: "", subjectBoards: {}, sound: true },
     buddy: { name: "Pip" },
     chests: 0,
@@ -1227,6 +1228,11 @@ const str = (v, max) => (typeof v === "string" ? v.trim().slice(0, max) : "");
 const num = (v, min, max, fallback) => (Number.isFinite(v) ? Math.min(max, Math.max(min, v)) : fallback);
 
 /** Turns anything loaded from storage, the cloud or an imported file into safe, well-formed data. */
+export function buildQuotePrompt(quote, subject = "") {
+  const q = String(quote || "").trim();
+  return `I'm revising${subject ? " " + subject : ""} for my exams. For this quote:\n\n"${q}"\n\n1. Who says it (and in which text, scene or source)?\n2. Why is it useful to remember — what does it show, and which exam topics or questions could I use it for?\n\nKeep each answer to one or two short sentences, and tell me if you aren't sure of the source.`;
+}
+
 export function sanitiseState(raw, catalogueIds = null) {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("That file isn't a revision backup.");
   const out = emptyState();
@@ -1287,6 +1293,15 @@ export function sanitiseState(raw, catalogueIds = null) {
       const id = str(t && t.id, 40);
       const name = str(t && t.name, 60);
       if (id && name) out.treats.push({ id, name, cost: Math.round(num(t.cost, 1, 100000, 100)) });
+    }
+  }
+  out.quotes = [];
+  if (Array.isArray(raw.quotes)) {
+    for (const x of raw.quotes.slice(0, 500)) {
+      const id = str(x && x.id, 40);
+      const text = str(x && x.text, 600);
+      if (!id || !text) continue;
+      out.quotes.push({ id, text, who: str(x.who, 120), why: str(x.why, 600), subjectId: str(x.subjectId, 40), date: typeof x.date === "string" && DATE_RE.test(x.date) ? x.date : "" });
     }
   }
   if (Array.isArray(raw.redeemed)) {
