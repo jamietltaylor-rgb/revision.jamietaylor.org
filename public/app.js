@@ -900,7 +900,7 @@ function viewQuestion() {
           ok ? "✅ Correct! 1 out of 1 mark" : session.dontKnow ? "No problem — here's the answer:" : "❌ Not quite — 0 out of 1 mark",
           session.given && h("span", { class: "ans" }, `You chose: ${optLabel(q, session.given)}`),
           !ok && h("span", { class: "ans" }, `Correct answer: ${optLabel(q, q.a)}`)),
-          !ok && whyBox(q),
+          whyBox(q, ok),
           h("div", { class: "row" }, h("button", { class: "primary", onclick: () => commit(ok) }, "Next →")));
       }
       return h("section", { class: "card" }, head, body);
@@ -961,7 +961,7 @@ function viewQuestion() {
       ok ? (session.aiAccepted ? "✅ Counts as correct!" : "✅ Correct!") : session.dontKnow ? "No problem — here's the answer:" : "❌ Not quite",
       session.given && !session.shown.options && h("span", { class: "ans" }, `You wrote: ${session.given}`),
       !ok || session.shown.options || session.aiAccepted || !sameAsAnswer(session.given, q.a) ? h("span", { class: "ans" }, `${ok && !session.shown.options ? "Exact answer" : "Answer"}: ${right}`) : null));
-    if (!ok) body.append(whyBox(q));
+    body.append(whyBox(q, ok));
     const last = session.index >= total - 1 && !(!ok && !item.retry);
     const next = h("button", { class: "primary", onclick: () => commit(ok) }, last ? "Finish" : "Next →");
     body.append(h("div", { class: "row" }, next,
@@ -1159,15 +1159,15 @@ function toggleSound() {
   render();
 }
 
-/** "Why?" box shown after a wrong answer: the AI explains the mix-up and why the right answer is right. Needs a login; otherwise it says so. */
-function whyBox(q) {
+/** "Why?" box shown after every answer: for a wrong one the AI says why you may have got confused, and for every answer why the right answer is what it is. Needs a login; otherwise it says so. */
+function whyBox(q, ok = false) {
   const key = `${session.index}:${session.given}`;
   const subject = (state.subjects.find((x) => x.id === q.subjectId) || {}).name || "";
   if (session.why && session.why.key !== key) session.why = null;
   const load = () => {
     const at = session.index;
     session.why = { key, status: "loading", text: "" };
-    cloud.explainAnswer({ q: q.q, a: q.a, answer: session.dontKnow ? "" : session.given, subject: subject.replace(/ – Exam questions$/, ""), options: q.opts || (session.shown && session.shown.options) || [] })
+    cloud.explainAnswer({ q: q.q, a: q.a, correct: Boolean(ok), answer: session.dontKnow ? "" : session.given, subject: subject.replace(/ – Exam questions$/, ""), options: q.opts || (session.shown && session.shown.options) || [] })
       .then((r) => { if (session && session.index === at && session.why && session.why.key === key) { session.why = { key, status: "done", text: r.explanation }; render(); } })
       .catch((e) => { if (session && session.index === at && session.why && session.why.key === key) { session.why = { key, status: "error", text: (e && e.message) || "" }; render(); } });
   };

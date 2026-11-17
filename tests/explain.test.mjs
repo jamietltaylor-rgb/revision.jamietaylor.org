@@ -35,3 +35,10 @@ test("copes with 'I don't know', plain-text replies and failures", async () => {
   const junk = await call(post(wrong), env({ run: async () => ({ response: "{}" }) }));
   assert.equal(junk.status, 502);
 });
+
+test("a right answer still gets an explanation of why the answer is what it is", async () => {
+  stubAuth(); let prompt = "";
+  const r = await call(post({ ...wrong, answer: "mitochondria", correct: true }), env({ run: async (m, i) => { prompt = i.messages[1].content; return { response: '{"explanation": "Mitochondria release energy from glucose in respiration, which is stored as ATP."}' }; } }));
+  assert.equal(r.status, 200); assert.match(r.body.explanation, /Mitochondria/);
+  assert.match(prompt, /got this question right/); assert.doesNotMatch(prompt, /got confused/);
+});
