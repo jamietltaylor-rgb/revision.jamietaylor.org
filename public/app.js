@@ -867,35 +867,105 @@ function markTutorial(id) {
   state.settings.tutorialSeen = true;
   save();
 }
+function findTourTarget(spec) {
+  if (!spec) return null;
+  const all = [...document.querySelectorAll(spec.sel)].filter((e) => e.offsetParent !== null || e.getClientRects().length);
+  let el = spec.has ? all.find((e) => (e.getAttribute("aria-label") || e.textContent || "").includes(spec.has)) : all[0];
+  if (!el) return null;
+  if (spec.card) {
+    const card = el.closest(".card");
+    if (card && card.getBoundingClientRect().height <= window.innerHeight * 0.42) el = card;
+  }
+  return el;
+}
+
+/** A guided tour: goes to the real screen, dims everything else and lights up the thing being explained. */
+function runTour(section, onExit) {
+  const startTab = tab;
+  let step = 0, over, hole, tip, raf = 0, token = 0;
+  const finish = (completed) => {
+    cancelAnimationFrame(raf);
+    window.removeEventListener("resize", place); window.removeEventListener("scroll", place, true);
+    document.removeEventListener("keydown", onKey, true);
+    over.remove();
+    if (tab !== startTab) { tab = startTab; try { location.hash = startTab; } catch { /* ignore */ } render(); }
+    if (completed) markTutorial(section.id);
+    onExit();
+  };
+  const onKey = (e) => { if (e.key === "Escape") { e.preventDefault(); finish(false); } else if (e.key === "ArrowRight") go1(1); else if (e.key === "ArrowLeft") go1(-1); };
+  const place = () => {
+    cancelAnimationFrame(raf);
+    raf = requestAnimationFrame(() => {
+      const el = hole._el;
+      const vw = window.innerWidth, vh = window.innerHeight;
+      if (!el || !document.contains(el)) {
+        hole.style.display = "none"; over.classList.add("tour-plain");
+        tip.style.cssText = "left:50%;top:50%;transform:translate(-50%,-50%)";
+        return;
+      }
+      over.classList.remove("tour-plain");
+      const r = el.getBoundingClientRect(), pad = 6;
+      hole.style.display = "block";
+      hole.style.left = `${r.left - pad}px`; hole.style.top = `${r.top - pad}px`;
+      hole.style.width = `${r.width + pad * 2}px`; hole.style.height = `${r.height + pad * 2}px`;
+      tip.style.transform = "none"; tip.style.left = "50%"; tip.style.marginLeft = `${-Math.min(vw - 24, 420) / 2}px`;
+      if (r.top + r.height / 2 < vh / 2) { tip.style.bottom = "12px"; tip.style.top = "auto"; }
+      else { tip.style.top = "12px"; tip.style.bottom = "auto"; }
+    });
+  };
+  const show = async () => {
+    const mine = ++token;
+    const [title, text, target] = section.steps[step];
+    if (target && target.tab && target.tab !== tab) { go(target.tab); }
+    await new Promise((r) => setTimeout(r, target && target.tab ? 220 : 60));
+    if (mine !== token) return;
+    const el = findTourTarget(target);
+    hole._el = el;
+    if (el) { const r0 = el.getBoundingClientRect(); const fixed = getComputedStyle(el.closest("#nav,#user,header") || el).position === "fixed" || el.closest("#nav") || el.closest("#user"); if (!fixed) window.scrollBy(0, r0.top - 72); }
+    const last = step === section.steps.length - 1;
+    tip.replaceChildren(
+      h("div", { class: "tour-body" },
+        h("p", { class: "small muted", style: "margin:0 0 .2rem" }, `${section.icon} ${section.title} · step ${step + 1} of ${section.steps.length}`),
+        h("h2", { class: "tour-h" }, title),
+        h("p", { class: "tut-text" }, text),
+        target && !el && h("p", { class: "small muted" }, "(This part isn't on screen right now.)")),
+      h("div", { class: "row tour-foot" },
+        h("button", { type: "button", onclick: () => go1(-1) }, step > 0 ? "← Back" : "✕ Close"),
+        h("button", { type: "button", class: "primary", onclick: () => go1(1) }, last ? "Done ✓" : "Next →")));
+    place();
+    setTimeout(place, 150);
+  };
+  const go1 = (d) => {
+    if (d < 0 && step === 0) return finish(false);
+    if (d > 0 && step === section.steps.length - 1) return finish(true);
+    step += d; show();
+  };
+  hole = h("div", { class: "tour-hole" });
+  tip = h("div", { class: "tour-tip", role: "dialog", "aria-modal": "true" });
+  over = h("div", { class: "tour-over" }, hole, tip);
+  document.body.append(over);
+  window.addEventListener("resize", place); window.addEventListener("scroll", place, true);
+  document.addEventListener("keydown", onKey, true);
+  show();
+}
+
 function openTutorial(first = false) {
   if (document.getElementById("tutorial-box")) return;
   const previous = document.activeElement;
-  let section = null, step = 0, box;
+  let box;
   if (state.settings.tutorialSeen === false) { state.settings.tutorialSeen = true; save(); }
   const close = () => { document.removeEventListener?.("keydown", onKey, true); box.remove(); try { previous && previous.focus && previous.focus(); } catch { /* ignore */ } };
   const onKey = (e) => { if (e.key === "Escape") { e.preventDefault(); close(); } };
   const card = h("div", { class: "modal tutorial", role: "dialog", "aria-modal": "true", "aria-labelledby": "tut-title" });
   const draw = () => {
     const done = state.settings.tutorialDone || [];
-    if (!section) {
-      card.replaceChildren(
-        h("h2", { id: "tut-title" }, first ? "👋 Welcome to Revise!" : "📖 Tutorial"),
-        h("p", { style: "margin-bottom:.8rem" }, first ? "Here's a quick guide. Don't worry — you only need to read the parts you don't already know. Pick one below, or press “Skip for now” (you can find this again at the top, next to Sign out)." : "Pick the part you want explained. Skip the ones you already know."),
-        ...TUTORIAL.map((sec) => h("button", { type: "button", class: "tut-item", onclick: () => { section = sec; step = 0; draw(); } },
-          h("span", { "aria-hidden": "true", class: "tut-ic" }, done.includes(sec.id) ? "✅" : sec.icon),
-          h("span", {}, h("strong", {}, sec.title), h("br"), h("span", { class: "small muted" }, sec.blurb)))),
-        h("div", { class: "row", style: "margin-top:.8rem;justify-content:flex-end" }, h("button", { type: "button", class: "primary", onclick: close }, first ? "Skip for now" : "Close")));
-    } else {
-      const [title, text] = section.steps[step];
-      const last = step === section.steps.length - 1;
-      card.replaceChildren(
-        h("p", { class: "small muted", style: "margin:0 0 .3rem" }, `${section.icon} ${section.title} · step ${step + 1} of ${section.steps.length}`),
-        h("h2", { id: "tut-title" }, title),
-        h("p", { class: "tut-text" }, text),
-        h("div", { class: "row", style: "margin-top:1rem;justify-content:space-between" },
-          h("button", { type: "button", onclick: () => { if (step > 0) step--; else section = null; draw(); } }, step > 0 ? "← Back" : "← All topics"),
-          h("button", { type: "button", class: "primary", onclick: () => { if (!last) { step++; draw(); } else { markTutorial(section.id); section = null; draw(); } } }, last ? "Done ✓" : "Next →")));
-    }
+    card.replaceChildren(
+      h("h2", { id: "tut-title" }, first ? "👋 Welcome to Revise!" : "📖 Tutorial"),
+      h("p", { style: "margin-bottom:.8rem" }, first ? "Pick a part and I'll show you around the real screen, lighting up each button as I explain it. You only need the parts you don't already know. Press “Skip for now” to leave (you can find this again at the top, next to Sign out)." : "Pick the part you want shown. I'll go to the real screen and light up each thing. Skip the ones you already know."),
+      ...TUTORIAL.map((sec) => h("button", { type: "button", class: "tut-item", onclick: () => { close(); runTour(sec, () => { first = false; openTutorial(false); }); } },
+        h("span", { "aria-hidden": "true", class: "tut-ic" }, done.includes(sec.id) ? "✅" : sec.icon),
+        h("span", {}, h("strong", {}, sec.title), h("br"), h("span", { class: "small muted" }, sec.blurb)))),
+      h("div", { class: "row", style: "margin-top:.8rem;justify-content:flex-end" }, h("button", { type: "button", class: "primary", onclick: close }, first ? "Skip for now" : "Close")));
   };
   box = h("div", { id: "tutorial-box", class: "modal-back", onclick: (e) => { if (e.target === box) close(); } }, card);
   draw();

@@ -75,7 +75,7 @@ The Quotes tab saves quotes with who says them and why they are useful (optional
 You can also paste a whole list of quotes (Quote | Who says it | Why it is useful) from another AI; the app writes the prompt for you.
 
 ## Tutorial
-A step-by-step tutorial (public/tutorial.js) opens for brand-new accounts and is always available from the Tutorial button next to Sign out. It is split into sections so people read only what they need.
+A guided tour (public/tutorial.js) opens for brand-new accounts and is always available from the Tutorial button next to Sign out. It goes to the real screen, dims everything else and highlights the button being explained. Split into sections so people read only what they need.
 
 ## Reading aloud
 `/api/speak` reads quotes with Workers AI (Deepgram Aura, @cf/deepgram/aura-1). It needs the AI binding and a sign-in. Clips are cached on each device; without the AI voice the device's own voice is used. Note Aura is a partner model billed per character, so it may not be on the free plan; the app falls back to the device voice if so.

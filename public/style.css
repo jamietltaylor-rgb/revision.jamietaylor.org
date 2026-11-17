@@ -255,3 +255,14 @@ button.danger-solid:hover:not(:disabled) { border-color: var(--bad); filter: bri
 .tut-text { font-size: 1.1rem; line-height: 1.5; color: var(--fg); }
 .tut-item { display: flex; align-items: center; gap: .8rem; width: 100%; text-align: left; margin: 0 0 .5rem; padding: .7rem .8rem; }
 .tut-ic { font-size: 1.6rem; }
+
+.tour-over { position: fixed; inset: 0; z-index: 70; }
+.tour-over.tour-plain { background: rgb(0 0 0 / 65%); }
+.tour-hole { position: fixed; display: none; border-radius: 14px; box-shadow: 0 0 0 9999px rgb(0 0 0 / 68%); outline: 3px solid #fff; outline-offset: 0; pointer-events: none; animation: tourpulse 1.6s ease-in-out infinite; }
+@keyframes tourpulse { 50% { outline-color: var(--accent); } }
+.tour-tip { position: fixed; width: min(calc(100vw - 24px), 420px); max-height: 40vh; display: flex; flex-direction: column; background: var(--card); color: var(--fg); border: 1px solid var(--border); border-radius: 16px; padding: 1rem 1.1rem; box-shadow: 0 20px 50px -12px rgb(0 0 0 / 60%); }
+.tour-h { margin: 0 0 .3rem; font-size: 1.15rem; }
+.tour-tip .tut-text { margin: 0; font-size: 1rem; }
+@media (prefers-reduced-motion: reduce) { .tour-hole { animation: none; } }
+.tour-body { overflow-y: auto; flex: 1 1 auto; min-height: 0; }
+.tour-foot { margin-top: .7rem; justify-content: space-between; flex: 0 0 auto; }
