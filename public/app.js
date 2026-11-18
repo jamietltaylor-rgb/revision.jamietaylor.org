@@ -1546,11 +1546,11 @@ function viewQuestion() {
       const box = h("textarea", { id: "answer", maxlength: 4000, style: `min-height:${long ? 15 : q.marks >= 3 ? 9 : 6}rem`, placeholder: kindPlaceholder(q, subject && subject.name), "aria-label": "Your answer" });
       const words = h("span", { class: "small muted" }, "0 words");
       box.addEventListener("input", () => { const n = (box.value.match(/\S+/g) || []).length; words.textContent = `${n} word${n === 1 ? "" : "s"}`; });
-      body.append(box, long && h("div", { class: "row", style: "margin-top:.3rem" }, words,
+      body.append(...[box, long && h("div", { class: "row", style: "margin-top:.3rem" }, words,
         h("span", { class: "small muted" }, q.marks >= 9 ? (isEnglishLang(subject && subject.name) ? "Marked in levels — content, organisation and accurate spelling, punctuation and grammar." : "Marked in levels — explain your points and finish with a justified judgement.") : "Marked in levels — explain each point, don't just list.")),
         h("div", { class: "row", style: "margin-top:.7rem" },
         h("button", { class: "primary", onclick: () => submitExam(box.value) }, "Mark my answer"),
-        h("button", { class: "ghost", onclick: () => submitExam("") }, "I don't know")));
+        h("button", { class: "ghost", onclick: () => submitExam("") }, "I don't know"))].filter(Boolean));
       setTimeout(() => box.focus(), 0);
     } else if (session.stage === "marking") {
       body.append(h("p", { class: "verdict", role: "status" }, "⏳ Marking your answer…"));
