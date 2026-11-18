@@ -1931,7 +1931,7 @@ function chosenSubjectName() {
 /** The kinds of exam question ticked in the maker (or, until the person chooses, the ones this subject's real exam has). */
 const examKinds = () => (Array.isArray(draft.kinds) ? draft.kinds.filter((k) => L.EXAM_KIND_IDS.includes(k)) : L.defaultExamKinds(chosenSubjectName(), draft.topic));
 const MAX_COUNT = 50;
-const maxCount = () => (draft.mode === "exam" ? 20 : MAX_COUNT);
+const maxCount = () => (draft.mode === "exam" ? (L.isMathsSubject(chosenSubjectName(), draft.topic) ? 30 : 20) : MAX_COUNT);
 function wantedCount() { return Math.max(1, Math.min(maxCount(), Math.round(Number(draft.count)) || (draft.mode === "exam" ? 5 : 10))); }
 async function makeWithAi() {
   const topic = draft.topic.trim();
@@ -2191,10 +2191,11 @@ function viewQuestions() {
       })(),
       (draft.wasMaths = L.isMathsSubject(chosenSubjectName(), draft.topic)) && h("div", { class: "card", style: "margin:.6rem 0;padding:.7rem .9rem;border:2px solid var(--accent)" },
         h("label", {}, "📐 Which maths paper? (Edexcel)",
-          h("select", { "aria-label": "Which maths paper", onchange: (e) => { draft.mathsPaper = e.target.value; render(); } },
+          h("select", { "aria-label": "Which maths paper", onchange: (e) => { draft.mathsPaper = e.target.value; if (draft.mathsPaper !== "all") { draft.mode = "exam"; draft.count = "25"; } render(); } },
             [["all", "All three papers — mixed"], ["1", "Paper 1 — NON-calculator"], ["2", "Paper 2 — calculator"], ["3", "Paper 3 — calculator"]].map(([v, label]) => h("option", { value: v, selected: (draft.mathsPaper || "all") === v }, label)))),
+        (draft.mathsPaper || "all") !== "all" && h("p", { class: "small", style: "margin:.4rem 0 0;font-weight:600" }, "✅ Set to a full paper: complete exam questions, about 25 of them (a real paper has 80 marks). You can change the number below. A full paper uses a lot of your daily AI allowance, so shorter sets are fine too."),
         h("p", { class: "small muted", style: "margin:.4rem 0 0" }, (draft.mathsPaper || "all") === "1" ? "Paper 1: no calculator allowed, so the numbers are friendly and answers are exact." : (draft.mathsPaper || "all") === "all" ? "Each question is tagged Paper 1 (no calculator) or Paper 2/3 (calculator), like the real exams." : `Paper ${draft.mathsPaper}: calculator allowed, so expect decimals, rounding and trigonometry.`))),
-    h("label", {}, "Type of questions", h("select", { "aria-label": "Type of questions", onchange: (e) => { draft.mode = e.target.value; if (draft.mode === "exam" && Number(draft.count) > 20) draft.count = "5"; render(); } },
+    h("label", {}, "Type of questions", h("select", { "aria-label": "Type of questions", onchange: (e) => { draft.mode = e.target.value; if (draft.mode === "exam" && Number(draft.count) > maxCount()) draft.count = "5"; render(); } },
       [["quick", "Quick questions (short answers)"], ["exam", "Complete exam questions (marks + mark scheme)"]].map(([v, l]) => opt(v, l, draft.mode)))),
     draft.mode === "exam" && h("p", { class: "small muted", style: "margin:0 0 .6rem" }, "Questions set the way real papers set them, with a mark scheme. You write your answer and the app marks it for you (6 and 9 markers are marked in levels, like the real thing). They're saved as their own topic, like “Biology – Exam questions”, so they stay separate from your quick questions."),
     draft.mode === "exam" && (() => {
@@ -2219,7 +2220,7 @@ function viewQuestions() {
         hidden > 0 && h("p", { class: "small", style: "margin:.4rem 0 0" }, h("button", { type: "button", class: "ghost", style: "min-height:34px;padding:.2rem .7rem", onclick: () => { draft.allKinds = true; render(); } }, `Show ${hidden} more kind${hidden === 1 ? "" : "s"} (not usual in this subject)`)),
         h("p", { class: "small muted", style: "margin:.45rem 0 0" }, `You’ll get a paper-style mix: ${mix}.`),
         L.isBusinessSubject(chosenSubjectName(), draft.topic) && h("p", { class: "small muted", style: "margin:.25rem 0 0" }, "The “Outline one”, “Analyse” and “Justify” questions are set around a made-up business with a short case-study extract, like the Edexcel papers."),
-        f.figures.length > 0 && h("p", { class: "small muted", style: "margin:.25rem 0 0" }, `Some questions may also come with a ${f.figures.map((x) => (x === "table" ? "table" : x + " chart")).join(", ").replace(/line chart/, "line graph").replace(/scatter chart/, "scatter graph")}.`));
+        f.figures.length > 0 && h("p", { class: "small muted", style: "margin:.25rem 0 0" }, `Some questions may also come with a ${f.figures.map((x) => (x === "table" ? "table" : x === "shape" ? "diagram" : x + " chart")).join(", ").replace(/line chart/, "line graph").replace(/scatter chart/, "scatter graph")}.`));
     })(),
     h("p", { class: "small", style: "margin:0 0 .5rem" }, h("button", { type: "button", class: "ghost small", onclick: () => openBoardQuiz(draft.subjectId, (b, sid) => { setBoardFor(sid, b); if (sid === draft.subjectId) draft.board = b; save(); render(); toast(`Exam board for this subject set to ${b}.`); }) }, "🤔 I don't know my exam board")),
     h("p", { class: "small muted", style: "margin:0 0 .4rem" }, draft.board !== "Any exam board" ? `Questions will follow the ${draft.board} specification. Your board is remembered for this subject.` : "Pick your exam board and the questions will follow its specification. It's remembered for next time."),
@@ -2264,7 +2265,7 @@ function viewQuestions() {
           it.opts && h("span", { class: "a" }, it.opts.map((o, i) => `${LETTERS[i]}. ${o}`).join("    ")),
           it.ctx && h("span", { class: "a" }, `Case study: ${it.ctx}`),
           h("span", { class: "a" }, `${it.opts ? (it.answers ? "Correct answers" : "Correct answer") : it.exam ? `Mark scheme (${markWord(it.marks)})` : "Answer"}: ${it.opts ? correctLabels(it) : it.a}${it.choices && it.choices.length ? `  ·  wrong options: ${it.choices.join(", ")}` : ""}`),
-          it.exam && h("span", { class: "tag" }, `${it.opts ? "🔠 " : "📝 "}${kindTag(it, chosenSubjectName()) ? kindTag(it, chosenSubjectName()) + " · " : ""}${markWord(it.marks)}`), it.fig && h("span", { class: "tag" }, `📊 ${it.fig.type === "table" ? "table" : it.fig.type + " chart"}`),
+          it.exam && h("span", { class: "tag" }, `${it.opts ? "🔠 " : "📝 "}${kindTag(it, chosenSubjectName()) ? kindTag(it, chosenSubjectName()) + " · " : ""}${markWord(it.marks)}`), it.fig && h("span", { class: "tag" }, `📊 ${it.fig.type === "table" ? "table" : it.fig.type === "shape" ? "diagram" : it.fig.type + " chart"}`),
           it.calc && h("span", { class: "tag" }, L.calcLabel(it.calc, it.paper)), it.how && h("span", { class: "tag" }, "📐 with worked solution"),
           it.duplicate && h("span", { class: "tag" }, "already in this subject")))),
       h("div", { class: "row", style: "margin-top:.8rem" },
@@ -2292,7 +2293,7 @@ function viewQuestions() {
         h("div", { class: "txt" }, h("div", {}, q.q), q.exam && h("div", { class: "small muted" }, `📝 ${kindTag(q, ((state.subjects.find((s) => s.id === q.subjectId) || {}).name) || "") ? kindTag(q, ((state.subjects.find((s) => s.id === q.subjectId) || {}).name) || "") + " · " : ""}${markWord(q.marks)}`),
           q.ctx && h("div", { class: "a" }, `Case study: ${q.ctx}`),
           h("div", { class: "a" }, q.opts ? `Multiple choice — correct: ${correctLabels(q)}` : q.exam ? `Mark scheme (${markWord(q.marks)}): ${q.a}` : `Answer: ${q.a}${q.choices.length ? "  ·  multiple choice" : ""}`),
-          q.fig && h("div", { class: "small muted" }, `📊 Includes a ${q.fig.type === "table" ? "table" : q.fig.type + " chart"}${q.fig.title ? ": " + q.fig.title : ""}`),
+          q.fig && h("div", { class: "small muted" }, `📊 Includes a ${q.fig.type === "table" ? "table" : q.fig.type === "shape" ? "diagram" : q.fig.type + " chart"}${q.fig.title ? ": " + q.fig.title : ""}`),
           h("div", { class: "small muted" }, `${q.src ? "📄 " + q.src + " · " : ""}${names.get(q.subjectId) || ""} · box ${q.box}/5 · next ${q.due <= today() ? "now" : niceDate(q.due)}`)),
         h("button", { class: "ghost small danger", "aria-label": `Delete question: ${q.q}`, onclick: () => deleteQuestion(q.id) }, "✕"))),
       shown.length > 150 && h("p", { class: "muted small" }, `Showing the first 150 of ${shown.length}. Use the search box to narrow it down.`),

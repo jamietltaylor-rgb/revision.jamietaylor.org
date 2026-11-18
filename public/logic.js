@@ -303,9 +303,9 @@ function mergeAnswers(a, alts) {
 
 
 // ---------- exam question formats: multiple choice and figures (graphs, charts, tables) ----------
-export const FIG_TYPES = ["table", "bar", "line", "scatter", "pie"];
+export const FIG_TYPES = ["table", "bar", "line", "scatter", "pie", "shape"];
 const FORMAT_RULES = [
-  [/\b(maths?|mathematics|statistics|algebra|geometry|trigonometry|calculus)\b/i, false, ["line", "scatter", "bar", "pie", "table"]],
+  [/\b(maths?|mathematics|statistics|algebra|geometry|trigonometry|calculus)\b/i, false, ["shape", "line", "scatter", "bar", "pie", "table"]],
   [/\b(computer science|computing|ict|information technology)\b/i, true, ["table"]],
   [/\b(biology|chemistry|physics|geology|astronomy|(combined|triple|applied|natural|environmental|earth|forensic)?\s*science)\b/i, true, ["table", "line", "bar", "scatter"]],
   [/\bgeography\b/i, true, ["table", "bar", "line", "pie", "scatter"]],
@@ -523,6 +523,7 @@ const asNum = (v) => { const n = typeof v === "string" ? Number(v.replace(/,/g, 
 const cellText = (v, n) => clean(typeof v === "number" ? String(v) : v).slice(0, n);
 function figType(t) {
   const x = String(t ?? "").toLowerCase().replace(/[^a-z]/g, "");
+  if (x.includes("shape") || x.includes("diagram") || x.includes("geometry")) return "shape";
   if (x.includes("pie")) return "pie";
   if (x.includes("scatter")) return "scatter";
   if (x.includes("line")) return "line";
@@ -531,11 +532,81 @@ function figType(t) {
   return "";
 }
 
+// ---------- maths diagrams: triangle, rectangle, circle, sphere, cylinder, cone, cuboid ----------
+const SHAPE_KEYS = {
+  triangle: ["AB", "BC", "AC", "A", "B", "C"], rectangle: ["w", "h", "d"], circle: ["r", "d", "angle"],
+  sphere: ["r"], cylinder: ["r", "h"], cone: ["r", "h", "l"], cuboid: ["l", "w", "h"],
+};
+function cleanShape(fig) {
+  const shape = String(fig.shape ?? fig.kind ?? fig.name ?? "").toLowerCase().replace(/[^a-z]/g, "").replace(/^(right)?angled?triangle$/, "triangle").replace(/^square$/, "rectangle").replace(/^hemisphere$/, "sphere");
+  const keys = SHAPE_KEYS[shape];
+  if (!keys) return null;
+  const raw = fig.labels && typeof fig.labels === "object" && !Array.isArray(fig.labels) ? fig.labels : {};
+  const labels = {};
+  for (const k of keys) {
+    const v = raw[k] ?? raw[k.toLowerCase()] ?? raw[k.toUpperCase()] ?? (k.length === 2 ? raw[k[1] + k[0]] : undefined);
+    const t = cellText(v, 16);
+    if (t) labels[k] = t;
+  }
+  if (!Object.keys(labels).length) return null;
+  const right = shape === "triangle" && ["A", "B", "C"].includes(String(fig.right ?? "").toUpperCase()) ? String(fig.right).toUpperCase() : "";
+  return { type: "shape", shape, title: cellText(fig.title, 80), labels, ...(right ? { right } : {}) };
+}
+const SHAPE_NAME = { triangle: "triangle", rectangle: "rectangle", circle: "circle", sphere: "sphere", cylinder: "cylinder", cone: "cone", cuboid: "cuboid" };
+
+/** Draws a maths diagram as SVG (not to scale, like "Diagram NOT accurately drawn" on real papers). Labels are escaped. */
+function shapeSvg(fig) {
+  const W = 360, H = 250, lb = fig.labels, o = [];
+  const sc = "stroke=\"currentColor\" stroke-width=\"2\" fill=\"none\"";
+  const txt = (x, y, t, anchor = "middle", cls = "") => t ? `<text x="${x}" y="${y}" text-anchor="${anchor}" font-size="16" fill="currentColor"${cls}>${esc(t)}</text>` : "";
+  const line = (a, b, c, d, dash) => `<line x1="${a}" y1="${b}" x2="${c}" y2="${d}" ${sc}${dash ? ' stroke-dasharray="5 4"' : ""}/>`;
+  const ell = (cx, cy, rx, ry, dash) => `<ellipse cx="${cx}" cy="${cy}" rx="${rx}" ry="${ry}" ${sc}${dash ? ' stroke-dasharray="5 4"' : ""}/>`;
+  if (fig.shape === "triangle") {
+    const P = fig.right === "B" ? { A: [50, 200], B: [300, 200], C: [300, 55] } : fig.right === "A" ? { A: [60, 200], B: [310, 200], C: [60, 55] } : fig.right === "C" ? { A: [60, 55], B: [310, 200], C: [60, 200] } : { A: [50, 205], B: [300, 205], C: [185, 50] };
+    const g = [(P.A[0] + P.B[0] + P.C[0]) / 3, (P.A[1] + P.B[1] + P.C[1]) / 3];
+    o.push(`<polygon points="${["A", "B", "C"].map((k) => P[k].join(",")).join(" ")}" ${sc}/>`);
+    const away = (x, y, d) => { const dx = x - g[0], dy = y - g[1], n = Math.hypot(dx, dy) || 1; return [Math.round(x + (dx / n) * d), Math.round(y + (dy / n) * d + 5)]; };
+    for (const [k, a, b] of [["AB", "A", "B"], ["BC", "B", "C"], ["AC", "A", "C"]]) { const m = away((P[a][0] + P[b][0]) / 2, (P[a][1] + P[b][1]) / 2, 20); o.push(txt(m[0], m[1], lb[k])); }
+    for (const k of ["A", "B", "C"]) {
+      const v = away(P[k][0], P[k][1], 16); o.push(`<text x="${v[0]}" y="${v[1]}" text-anchor="middle" font-size="16" font-weight="700" fill="currentColor">${k}</text>`);
+      const inn = [Math.round(P[k][0] + (g[0] - P[k][0]) * 0.28), Math.round(P[k][1] + (g[1] - P[k][1]) * 0.28 + 5)]; o.push(txt(inn[0], inn[1], lb[k]));
+    }
+    if (fig.right) { const r = P[fig.right], others = ["A", "B", "C"].filter((k) => k !== fig.right).map((k) => { const dx = P[k][0] - r[0], dy = P[k][1] - r[1], n = Math.hypot(dx, dy); return [dx / n * 16, dy / n * 16]; }); o.push(`<polyline points="${r[0] + others[0][0]},${r[1] + others[0][1]} ${r[0] + others[0][0] + others[1][0]},${r[1] + others[0][1] + others[1][1]} ${r[0] + others[1][0]},${r[1] + others[1][1]}" ${sc} stroke-width="1.5"/>`); }
+  } else if (fig.shape === "rectangle") {
+    o.push(`<rect x="60" y="50" width="240" height="140" ${sc}/>`);
+    if (lb.d) { o.push(line(60, 190, 300, 50)); o.push(txt(160, 108, lb.d, "end")); }
+    o.push(txt(180, 215, lb.w), txt(318, 125, lb.h, "start"));
+  } else if (fig.shape === "circle") {
+    o.push(`<circle cx="180" cy="120" r="90" ${sc}/>`);
+    const ang = Math.max(1, Math.min(359, Number(String(lb.angle || "").replace(/[^0-9.]/g, "")) || 0));
+    if (lb.angle) {
+      const rad = (ang * Math.PI) / 180, ex = Math.round(180 + 90 * Math.cos(rad)), ey = Math.round(120 - 90 * Math.sin(rad));
+      o.push(`<path d="M180 120 L270 120 A90 90 0 ${ang > 180 ? 1 : 0} 0 ${ex} ${ey} Z" fill="var(--fig-1,#2563eb)" fill-opacity="0.2" stroke="currentColor" stroke-width="2"/>`);
+      const mid = (ang / 2 * Math.PI) / 180; o.push(txt(Math.round(180 + 40 * Math.cos(mid)), Math.round(125 - 40 * Math.sin(mid)), lb.angle.includes("°") ? lb.angle : lb.angle + "°"));
+    } else if (lb.d) { o.push(line(90, 120, 270, 120)); }
+    else o.push(line(180, 120, 270, 120));
+    o.push(`<circle cx="180" cy="120" r="3" fill="currentColor"/>`);
+    if (lb.r) o.push(txt(232, ang && lb.angle ? 138 : 112, lb.r));
+    if (lb.d) o.push(txt(180, 112, lb.d));
+  } else if (fig.shape === "sphere") {
+    o.push(`<circle cx="180" cy="120" r="90" ${sc}/>`, ell(180, 120, 90, 24, true), line(180, 120, 270, 120), `<circle cx="180" cy="120" r="3" fill="currentColor"/>`, txt(226, 138, lb.r));
+  } else if (fig.shape === "cylinder") {
+    o.push(ell(180, 60, 80, 24), `<path d="M100 60 V190 A80 24 0 0 0 260 190 V60" ${sc}/>`, ell(180, 190, 80, 24, true).replace(/stroke-dasharray="5 4"/, 'stroke-dasharray="5 4" clip-path="inset(50% 0 0 0)"'), line(180, 60, 260, 60), txt(222, 78, lb.r), line(278, 60, 278, 190), txt(292, 130, lb.h, "start"));
+  } else if (fig.shape === "cone") {
+    o.push(`<path d="M100 185 L180 30 L260 185" ${sc}/>`, `<path d="M100 185 A80 24 0 0 0 260 185" ${sc}/>`, `<path d="M100 185 A80 24 0 0 1 260 185" ${sc} stroke-dasharray="5 4"/>`, line(180, 30, 180, 185, true), line(180, 185, 260, 185, true), txt(188, 112, lb.h, "start"), txt(220, 176, lb.r), txt(238, 100, lb.l, "start"));
+  } else if (fig.shape === "cuboid") {
+    o.push(`<rect x="50" y="90" width="200" height="120" ${sc}/>`, `<polyline points="50,90 100,50 300,50 250,90" ${sc}/>`, line(250, 90, 300, 50), line(300, 50, 300, 170), line(300, 170, 250, 210), line(50, 210, 100, 170, true), line(100, 170, 300, 170, true), line(100, 50, 100, 170, true), txt(150, 232, lb.l), txt(284, 206, lb.w, "start"), txt(38, 155, lb.h, "end"));
+  }
+  const alt = `Diagram of a ${SHAPE_NAME[fig.shape]}. ${Object.entries(lb).map(([k, v]) => `${k} = ${v}`).join(", ")}${fig.right ? `. Right angle at ${fig.right}` : ""}.`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H + 18}" role="img" aria-label="${esc(alt)}" style="width:100%;height:auto;max-width:380px;color:inherit" font-family="system-ui,sans-serif">${o.join("")}<text x="${W / 2}" y="${H + 10}" text-anchor="middle" font-size="12" font-style="italic" fill="currentColor" opacity="0.75">Diagram NOT accurately drawn</text></svg>`;
+}
+
 /** Checks and tidies a figure (table, bar/line chart, scatter graph or pie chart). Returns null if it isn't usable. */
 export function cleanFigure(fig, allowed = FIG_TYPES) {
   if (!fig || typeof fig !== "object" || Array.isArray(fig)) return null;
   const type = figType(fig.type);
   if (!type || !allowed.includes(type)) return null;
+  if (type === "shape") return cleanShape(fig);
   const base = { type, title: cellText(fig.title, 80) };
   const xLabel = cellText(fig.xLabel ?? fig.xlabel ?? fig.xAxis ?? fig.x_axis ?? fig.x_label, 40);
   const yLabel = cellText(fig.yLabel ?? fig.ylabel ?? fig.yAxis ?? fig.y_axis ?? fig.y_label, 40);
@@ -662,7 +733,7 @@ const trunc = (t, n) => (t.length > n ? t.slice(0, n - 1) + "…" : t);
 /** A short text description of a figure, for screen readers. */
 export function figureAlt(fig) {
   if (!fig) return "";
-  const name = { table: "Table", bar: "Bar chart", line: "Line graph", scatter: "Scatter graph", pie: "Pie chart" }[fig.type] || "Figure";
+  const name = { shape: "Diagram", table: "Table", bar: "Bar chart", line: "Line graph", scatter: "Scatter graph", pie: "Pie chart" }[fig.type] || "Figure";
   let data = "";
   if (fig.type === "pie") data = fig.labels.map((l, i) => `${l} ${numFmt(fig.values[i])}`).join(", ");
   else if (fig.type === "scatter") data = fig.points.map(([x, y]) => `(${numFmt(x)}, ${numFmt(y)})`).join(" ");
@@ -673,6 +744,7 @@ export function figureAlt(fig) {
 /** Draws a bar chart, line graph, scatter graph or pie chart as SVG text (all text is escaped). Tables are drawn by the page. */
 export function figureSvg(fig) {
   if (!fig || fig.type === "table") return "";
+  if (fig.type === "shape") return shapeSvg(fig);
   const W = 520, H = 320;
   const out = [];
   const title = fig.title ? `<text x="${W / 2}" y="18" text-anchor="middle" font-size="15" font-weight="700" fill="currentColor">${esc(trunc(fig.title, 70))}</text>` : "";
