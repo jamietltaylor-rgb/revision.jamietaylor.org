@@ -40,7 +40,7 @@ test("caps the number of questions and clamps odd values", async () => {
   stubAuth(); let prompt;
   const many = JSON.stringify(Array.from({ length: 40 }, (_, i) => ({ q: `q${i}`, a: `a${i}`, wrong: [] })));
   const r = await call(post({ topic: "Maths", count: 500, style: "weird" }), env({ run: async (m, i) => { prompt = i.messages[1].content; return { response: many }; } }));
-  assert.equal(r.body.questions.length, 15); assert.ok(prompt.includes("15 revision questions"));
+  assert.equal(r.body.questions.length, 15); assert.match(prompt, /15 (maths )?revision questions/);
   assert.equal((await call(post({ topic: "Maths", count: "abc" }), env({ run: async (m, i) => { prompt = i.messages[1].content; return { response: many }; } }))).body.questions.length, 10);
 });
 

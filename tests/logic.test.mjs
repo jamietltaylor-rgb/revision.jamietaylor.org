@@ -825,3 +825,34 @@ test("quote similarity and first letters", () => {
   assert.ok(L.quoteSimilarity("out spot", "Out, damned spot! Out, I say!") < 0.5);
   assert.equal(L.firstLetters("Is this a dagger?"), "I t a d?");
 });
+
+test("maths: Paper 1/2 tags and worked solutions are read from pasted lines and JSON", () => {
+  const r = L.parseQuestionList("Work out 3/4 of 20 | 15 | paper: 1 | how: 20 ÷ 4 = 5 ; 5 × 3 = 15\nFind 17.5% of 240 | 42 | paper: 2 | how: 240 × 0.175 = 42 | 40 | 44");
+  assert.equal(r.items[0].calc, "non");
+  assert.equal(r.items[0].how, "20 ÷ 4 = 5 ; 5 × 3 = 15");
+  assert.deepEqual(r.items[0].choices, []);
+  assert.equal(r.items[1].calc, "calc");
+  assert.deepEqual(r.items[1].choices, ["40", "44"]);
+  const j = L.parseQuestionList(JSON.stringify([{ q: "2x = 6", a: "3", paper: "Paper 1", how: ["Divide by 2", "x = 3"] }]));
+  assert.equal(j.items[0].calc, "non");
+  assert.equal(j.items[0].how, "Divide by 2 ; x = 3");
+  assert.equal(L.parseCalc("non-calculator"), "non");
+  assert.equal(L.parseCalc("Calculator"), "calc");
+  assert.equal(L.parseCalc("blah"), "");
+});
+test("maths prompt is Edexcel based, explains Paper 1 vs 2 and asks for worked steps", () => {
+  const p = L.buildAiPrompt({ topic: "Percentages", subject: "Maths", count: 8 });
+  assert.match(p, /Edexcel GCSE Mathematics/);
+  assert.match(p, /Paper 1 is a NON-CALCULATOR paper/);
+  assert.match(p, /paper: 1/);
+  assert.match(p, /how: step 1/);
+  assert.ok(!/wrong option 1/.test(p));
+  assert.match(L.buildAiPrompt({ topic: "Algebra", subject: "Maths", styles: ["choice"] }), /wrong option 1/);
+  assert.ok(!/Edexcel GCSE Mathematics/.test(L.buildAiPrompt({ topic: "Algebra", subject: "Maths", board: "AQA" })));
+  assert.ok(!/NON-CALCULATOR/.test(L.buildAiPrompt({ topic: "Cells", subject: "Biology" })));
+  assert.match(L.buildAiPrompt({ topic: "Algebra", subject: "Maths", mode: "exam", count: 4 }), /"paper": "1" or "2"/);
+});
+test("questions keep their working and paper", () => {
+  const s = L.sanitiseState({ subjects: [{ id: "s", name: "Maths" }], questions: [{ id: "q", subjectId: "s", q: "1+1", a: "2", how: "Add", calc: "non" }] });
+  assert.equal(s.questions[0].how, "Add"); assert.equal(s.questions[0].calc, "non");
+});

@@ -82,3 +82,6 @@ A guided tour (public/tutorial.js) opens for brand-new accounts and is always av
 
 ## Ask, quote learning and listening
 `/api/ask` answers a student's own question (Workers AI, free allowance, sign-in needed). The Quotes tab has Learn mode, a quiz that retries misses and asks for the whole quote from memory, Read-all and a chant-over-a-beat "song" (made in the browser with the Web Audio and speech APIs; no AI needed unless "Use the AI voice" is ticked).
+
+## Maths
+Maths prompts follow the Edexcel GCSE (1MA1) papers: Paper 1 is no calculator, Papers 2 and 3 allow one. Questions can carry `paper: 1|2` and `how: step ; step` columns (or JSON `paper`/`how`); the app shows a Paper badge, lets you practise one paper, and shows the saved working. With no saved working, a signed-in student gets an AI step-by-step method (right, wrong or "I don't know").

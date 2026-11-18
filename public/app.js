@@ -1348,6 +1348,7 @@ function viewRevise() {
 }
 
 let reviseMode = "quick"; // "quick" = short answers, "exam" = complete exam questions
+let revisePaper = "all"; // maths: all, non (Paper 1, no calculator) or calc (Papers 2 and 3)
 let reviseKind = "all"; // which exam questions to practise: all, mc (1–2 mark multiple choice), short (outline / explain) or long (6 and 9 markers)
 const KIND_GROUPS = {
   all: ["All kinds of question", () => true],
@@ -1398,17 +1399,20 @@ function viewSetup() {
     h("label", {}, "Subject", subjectSel),
     reviseMode === "exam" && h("label", {}, "Which kind of question?",
       h("select", { id: "kind", onchange: (e) => { reviseKind = e.target.value; } }, Object.entries(KIND_GROUPS).map(([v, [label]]) => h("option", { value: v, selected: v === reviseKind }, `${label}${v === "all" ? "" : ` (${pool.filter((q) => inKindGroup(q, v)).length})`}`)))),
+    state.questions.some((x) => x.calc) && h("label", {}, "Which maths paper?",
+      h("select", { id: "paperpick", "aria-label": "Which maths paper", onchange: (e) => { revisePaper = e.target.value; } },
+        [["all", "Both — mixed"], ["non", "Paper 1 — no calculator"], ["calc", "Paper 2 / 3 — calculator"]].map(([v, label]) => h("option", { value: v, selected: v === revisePaper }, label)))),
     h("label", {}, "How many?", lengthSel),
-    h("button", { class: "primary big", onclick: () => startSession(subjectSel.value, lengthSel.value, reviseMode, reviseMode === "exam" ? reviseKind : "all") }, "Start"));
+    h("button", { class: "primary big", onclick: () => startSession(subjectSel.value, lengthSel.value, reviseMode, reviseMode === "exam" ? reviseKind : "all", revisePaper) }, "Start"));
 }
 
-function startSession(subjectId, length, mode = null, kindGroup = "all") {
+function startSession(subjectId, length, mode = null, kindGroup = "all", paper = "all") {
   const t = today();
-  const pool = (mode ? ofMode(mode) : state.questions).filter((q) => inKindGroup(q, kindGroup));
+  const pool = (mode ? ofMode(mode) : state.questions).filter((q) => inKindGroup(q, kindGroup) && (paper === "all" || q.calc === paper));
   const dueCount = pool.filter((q) => (subjectId === "all" || q.subjectId === subjectId) && q.due <= t).length;
   const count = length === "due" ? Math.max(dueCount, 1) : length === "all" ? Infinity : Number(length) || 10;
   const { picked } = L.pickQuestions(pool, { subjectId, count, today: t });
-  if (!picked.length) return toast(kindGroup !== "all" ? "There are no questions of that kind in that subject yet." : "There are no questions in that subject yet.");
+  if (!picked.length) return toast(paper !== "all" ? "There are no questions for that maths paper in that subject yet." : kindGroup !== "all" ? "There are no questions of that kind in that subject yet." : "There are no questions in that subject yet.");
   session = {
     queue: picked.map((q) => ({ id: q.id, retry: false })), index: 0, combo: 0, results: [], pointsEarned: 0, chests: 0,
     stage: "ask", verdict: false, given: "", dontKnow: false, finished: false, newBadges: [], shown: null,
@@ -1480,7 +1484,7 @@ function viewQuestion() {
     bar(Math.round((session.index / total) * 100), "Round progress"));
 
   const body = h("div", {},
-    h("div", { class: "row", style: "margin-top:.8rem" }, h("span", { class: "tag" }, subject ? subject.name : "Question"), q.exam && h("span", { class: "tag" }, `📝 ${markWord(q.marks)}`), q.exam && kindTag(q, subject && subject.name) && h("span", { class: "tag" }, kindTag(q, subject && subject.name)), q.src && h("span", { class: "tag" }, `📄 ${q.src}`), item.retry && h("span", { class: "tag" }, "Second chance — no points")),
+    h("div", { class: "row", style: "margin-top:.8rem" }, h("span", { class: "tag" }, subject ? subject.name : "Question"), q.exam && h("span", { class: "tag" }, `📝 ${markWord(q.marks)}`), q.exam && kindTag(q, subject && subject.name) && h("span", { class: "tag" }, kindTag(q, subject && subject.name)), q.calc && h("span", { class: "tag" }, L.calcLabel(q.calc)), q.src && h("span", { class: "tag" }, `📄 ${q.src}`), item.retry && h("span", { class: "tag" }, "Second chance — no points")),
     ctxView(q, subject && subject.name),
     h("p", { class: "quiz-q" }, q.q),
     q.opts && q.opts.length && q.answers && h("p", { class: "small muted", style: "margin:-.4rem 0 .6rem" }, "Select two answers."),
@@ -1544,6 +1548,7 @@ function viewQuestion() {
         session.given && h("span", { class: "ans" }, `You wrote: ${session.given}`)),
         levelled && h("p", { class: "small", style: "margin:.6rem 0 .2rem" }, h("b", {}, session.given ? "What a good answer could include:" : "What a good answer could include:")),
         h("ul", { style: "list-style:none;margin:.6rem 0;padding:0" }, r.points.map((x) => h("li", { style: "padding:.15rem 0" }, `${x.met ? "✅" : levelled ? "⬜" : "❌"} ${x.text}`))),
+        (q.how || L.isMathsSubject((subject && subject.name) || "", "")) && whyBox(q, passed),
         levelled && h("p", { class: "small muted", style: "margin:0 0 .5rem" }, `Marked in levels: Level 1 (${bands[0][0]}–${bands[0][1]}) simple points; Level 2 (${bands[1][0]}–${bands[1][1]}) applied to the question, with some reasoning; Level 3 (${bands[2][0]}–${bands[2][1]}) developed, logical chains of reasoning${q.marks >= 9 ? " and a justified judgement" : ""}.`),
         ...(r.feedback ? [h("p", {}, r.feedback)] : []),
         h("p", { class: "small muted" }, r.source === "ai" ? "Marked by AI — it's a good guide but not perfect." : r.source === "local" ? "Marked by matching key words (the AI marker wasn't available), so it can miss answers worded differently." : "Here is the mark scheme."),
@@ -1775,14 +1780,27 @@ function toggleSound() {
 }
 
 /** "Why?" box shown after every answer: for a wrong one the AI says why you may have got confused, and for every answer why the right answer is what it is. Needs a login; otherwise it says so. */
+/** Shows steps one per line. Accepts "Step 1: … ; Step 2: …" or one step per line. */
+const stepsView = (text) => h("ol", { style: "margin:.4rem 0 0 1.2rem;padding:0" },
+  String(text).split(/\s+;\s+|\n+/).map((x) => x.replace(/^\s*(step\s*\d+\s*[:.)-]?|\d+\s*[.)])\s*/i, "").trim()).filter(Boolean).map((x) => h("li", { style: "margin:.25rem 0" }, x)));
+/** The AI's maths method: one line each, with "Step 1:", "Answer:" and "Tip:" in bold. */
+const methodLines = (text) => h("div", {}, String(text).split("\n").filter((x) => x.trim()).map((line) => {
+  const m = line.match(/^\s*(Step\s*\d+|Answer|Tip)\s*[:.]\s*(.*)$/i);
+  return h("p", { style: "margin:.3rem 0" }, m ? [h("b", {}, `${m[1]}: `), m[2]] : line);
+}));
 function whyBox(q, ok = false) {
   const key = `${session.index}:${session.given}`;
   const subject = (state.subjects.find((x) => x.id === q.subjectId) || {}).name || "";
+  const maths = L.isMathsSubject(subject, "") || Boolean(q.how);
   if (session.why && session.why.key !== key) session.why = null;
+  const wrap = (...kids) => h("div", { class: "why", role: "status", style: "margin:.8rem 0;padding:.7rem .9rem;border-radius:12px;background:rgba(120,130,200,.14)" }, ...kids);
+  if (q.how) { // a worked solution saved with the question: free, instant, no sign-in needed
+    return wrap(h("b", {}, "📐 How to do it"), h("p", { class: "small muted", style: "margin:.2rem 0 0" }, ok ? "Well done — here's the method so you can check it:" : session.dontKnow ? "No problem — here's how to do it:" : "Here's how to do it properly:"), stepsView(q.how));
+  }
   const load = () => {
     const at = session.index;
     session.why = { key, status: "loading", text: "" };
-    cloud.explainAnswer({ q: q.q, a: q.a, correct: Boolean(ok), answer: session.dontKnow ? "" : session.given, subject: subject.replace(/ – Exam questions$/, ""), options: q.opts || (session.shown && session.shown.options) || [] })
+    cloud.explainAnswer({ q: q.q, a: q.a, correct: Boolean(ok), answer: session.dontKnow ? "" : session.given, subject: subject.replace(/ – Exam questions$/, ""), options: q.opts || (session.shown && session.shown.options) || [], maths })
       .then((r) => { if (session && session.index === at && session.why && session.why.key === key) { session.why = { key, status: "done", text: r.explanation }; render(); } })
       .catch((e) => { if (session && session.index === at && session.why && session.why.key === key) { session.why = { key, status: "error", text: (e && e.message) || "" }; render(); } });
   };
@@ -1791,11 +1809,11 @@ function whyBox(q, ok = false) {
     else load();
   }
   const w = session.why;
-  const wrap = (...kids) => h("div", { class: "why", role: "status", style: "margin:.8rem 0;padding:.7rem .9rem;border-radius:12px;background:rgba(120,130,200,.14)" }, ...kids);
-  if (w.status === "loading") return wrap(h("b", {}, "💡 Why? "), h("span", { class: "muted" }, "Working it out…"));
-  if (w.status === "done") return wrap(h("b", {}, "💡 Why? "), h("span", {}, w.text));
+  const title = maths ? "📐 How to do it " : "💡 Why? ";
+  if (w.status === "loading") return wrap(h("b", {}, title), h("span", { class: "muted" }, maths ? "Working it out step by step…" : "Working it out…"));
+  if (w.status === "done") return wrap(h("b", {}, title), maths ? [methodLines(w.text), h("p", { class: "small muted", style: "margin:.4rem 0 0" }, "AI can slip on maths — check it against your notes.")] : h("span", {}, w.text));
   if (w.status === "error") return wrap(h("span", { class: "small muted" }, "Couldn't get an explanation just now. "), h("button", { class: "ghost small", onclick: () => { session.why = null; render(); } }, "Try again"));
-  return wrap(h("span", { class: "small muted" }, "💡 Sign in to get a short explanation of why the answer is what it is."));
+  return wrap(h("span", { class: "small muted" }, maths ? "📐 Sign in to get a step-by-step explanation of how to do this one." : "💡 Sign in to get a short explanation of why the answer is what it is."));
 }
 
 /** The Stop button: end the round now. Answers already given are kept and counted; with none yet, just go back home. */
@@ -1857,7 +1875,7 @@ function ensureSubject(fallbackName = "") {
   }
   return draft.subjectId;
 }
-const makeQuestion = (subjectId, q, a, choices = [], src = "", exam = null) => ({ id: L.uid(), subjectId, q, a, choices, ...(src ? { src: String(src).slice(0, 80) } : {}), ...(exam ? { exam: true, marks: exam.marks, ...(exam.kind ? { kind: exam.kind } : {}), ...(exam.ctx ? { ctx: exam.ctx } : {}), ...(exam.opts ? { opts: exam.opts } : {}), ...(exam.answers ? { answers: exam.answers, pick: 2 } : {}), ...(exam.fig ? { fig: exam.fig } : {}) } : {}), box: 1, due: today(), right: 0, wrong: 0 });
+const makeQuestion = (subjectId, q, a, choices = [], src = "", exam = null, extra = {}) => ({ id: L.uid(), subjectId, q, a, choices, ...(src ? { src: String(src).slice(0, 80) } : {}), ...(exam ? { exam: true, marks: exam.marks, ...(exam.kind ? { kind: exam.kind } : {}), ...(exam.ctx ? { ctx: exam.ctx } : {}), ...(exam.opts ? { opts: exam.opts } : {}), ...(exam.answers ? { answers: exam.answers, pick: 2 } : {}), ...(exam.fig ? { fig: exam.fig } : {}) } : {}), ...(extra.how ? { how: extra.how } : {}), ...(extra.calc ? { calc: extra.calc } : {}), box: 1, due: today(), right: 0, wrong: 0 });
 
 function addQuestion() {
   const q = draft.q.trim();
@@ -1978,7 +1996,7 @@ function addPreview() {
     if (!made) return toast("You have too many subjects already — delete one first.");
     examSubjectId = made.id;
   }
-  for (const it of keep) state.questions.push(it.exam ? makeQuestion(examSubjectId, it.q, it.a, [], it.src || "", { marks: it.marks, opts: it.opts, answers: it.answers, kind: it.kind, ctx: it.ctx, fig: it.fig }) : makeQuestion(subjectId, it.q, it.a, it.choices || [], it.src || ""));
+  for (const it of keep) state.questions.push(it.exam ? makeQuestion(examSubjectId, it.q, it.a, [], it.src || "", { marks: it.marks, opts: it.opts, answers: it.answers, kind: it.kind, ctx: it.ctx, fig: it.fig }, { how: it.how, calc: it.calc }) : makeQuestion(subjectId, it.q, it.a, it.choices || [], it.src || "", null, { how: it.how, calc: it.calc }));
   state.stats.created += keep.length;
   draft.preview = null; draft.paste = ""; draft.prompt = "";
   checkBadges();
@@ -2216,6 +2234,7 @@ function viewQuestions() {
           it.ctx && h("span", { class: "a" }, `Case study: ${it.ctx}`),
           h("span", { class: "a" }, `${it.opts ? (it.answers ? "Correct answers" : "Correct answer") : it.exam ? `Mark scheme (${markWord(it.marks)})` : "Answer"}: ${it.opts ? correctLabels(it) : it.a}${it.choices && it.choices.length ? `  ·  wrong options: ${it.choices.join(", ")}` : ""}`),
           it.exam && h("span", { class: "tag" }, `${it.opts ? "🔠 " : "📝 "}${kindTag(it, chosenSubjectName()) ? kindTag(it, chosenSubjectName()) + " · " : ""}${markWord(it.marks)}`), it.fig && h("span", { class: "tag" }, `📊 ${it.fig.type === "table" ? "table" : it.fig.type + " chart"}`),
+          it.calc && h("span", { class: "tag" }, L.calcLabel(it.calc)), it.how && h("span", { class: "tag" }, "📐 with worked solution"),
           it.duplicate && h("span", { class: "tag" }, "already in this subject")))),
       h("div", { class: "row", style: "margin-top:.8rem" },
         h("button", { class: "primary", onclick: addPreview }, `Add ${plural(picked, "question")}`),

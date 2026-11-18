@@ -42,3 +42,21 @@ test("a right answer still gets an explanation of why the answer is what it is",
   assert.equal(r.status, 200); assert.match(r.body.explanation, /Mitochondria/);
   assert.match(prompt, /got this question right/); assert.doesNotMatch(prompt, /got confused/);
 });
+
+test("maths questions get a step-by-step method, with line breaks kept", async () => {
+  const mod = await import("../functions/api/explain.js");
+  const seen = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({ id: "u" }), { status: 200 });
+  try {
+    const ai = { run: async (m, input) => { seen.push([input.messages[1].content, input.max_tokens]); return { response: '{"explanation": "You may have got confused because you added.\\nStep 1: 20 ÷ 4 = 5\\nStep 2: 5 × 3 = 15\\nAnswer: 15"}' }; } };
+    const res = await mod.onRequestPost({ request: new Request("https://a/api/explain", { method: "POST", headers: { authorization: "Bearer t", "content-type": "application/json" }, body: JSON.stringify({ q: "Work out 3/4 of 20", a: "15", answer: "80", subject: "Maths" }) }), env: { SUPABASE_URL: "https://x.supabase.co", SUPABASE_PUBLISHABLE_KEY: "k", AI: ai } });
+    const body = await res.json();
+    assert.match(body.explanation, /Step 1: 20 ÷ 4 = 5\nStep 2/);
+    assert.match(seen[0][0], /Step 1/);
+    assert.ok(seen[0][1] >= 500);
+    const dk = await mod.onRequestPost({ request: new Request("https://a/api/explain", { method: "POST", headers: { authorization: "Bearer t", "content-type": "application/json" }, body: JSON.stringify({ q: "Work out 3/4 of 20", a: "15", answer: "", subject: "Maths" }) }), env: { SUPABASE_URL: "https://x.supabase.co", SUPABASE_PUBLISHABLE_KEY: "k", AI: ai } });
+    assert.equal(dk.status, 200);
+    assert.match(seen[1][0], /didn't know/);
+  } finally { globalThis.fetch = realFetch; }
+});

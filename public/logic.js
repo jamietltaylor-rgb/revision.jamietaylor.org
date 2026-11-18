@@ -778,17 +778,55 @@ export function figureSvg(fig) {
   return open + out.join("") + "</svg>";
 }
 
+// ---------- maths: Edexcel-style papers (Paper 1 no calculator, Papers 2 and 3 calculator) and worked solutions ----------
+const MATHS_RE = /\b(maths?|mathematics|statistics|algebra|geometry|trigonometry|calculus|arithmetic|fractions?|percentages?|simultaneous equations?|quadratics?|probability|pythagoras|surds?|standard form|indices|ratio|vectors?)\b/i;
+export const isMathsSubject = (subject = "", topic = "") => MATHS_RE.test(`${subject} ${topic}`);
+/** "non" = Paper 1 (no calculator), "calc" = Paper 2 or 3 (calculator allowed). */
+export function parseCalc(v) {
+  const t = String(v ?? "").toLowerCase().trim();
+  if (!t) return "";
+  if (/\bnon\b|\bnon-|\bno\s*calc|without|^1$|paper\s*1\b/.test(t)) return "non";
+  if (/calc|^[23]$|paper\s*[23]\b/.test(t)) return "calc";
+  return "";
+}
+export const calcLabel = (c) => (c === "non" ? "🚫🧮 Paper 1 · No calculator" : c === "calc" ? "🧮 Paper 2/3 · Calculator" : "");
+const useEdexcelMaths = (board) => !board || board === "Any exam board" || board === "Edexcel";
+export function mathsNotes(board) {
+  return `${useEdexcelMaths(board) ? "Base them on the Edexcel GCSE Mathematics (1MA1) papers. " : ""}GCSE Maths has three papers, each 1 hour 30 minutes and 80 marks, and every paper covers Number, Algebra, Ratio/proportion/rates of change, Geometry and measures, Probability and Statistics. Paper 1 is a NON-CALCULATOR paper; Papers 2 and 3 are CALCULATOR papers.`;
+}
+const MATHS_PAPER_RULE = `- Tag every question with its paper. Paper 1 = it must be answerable WITHOUT a calculator (friendly numbers, fractions, surds, answers left exact such as 12π or 3√2, only exact trig values, no awkward decimals). Paper 2 = it needs a calculator (decimals, percentages of awkward amounts, compound interest, trigonometry on a calculator, rounding to 3 significant figures or 1 decimal place, standard form on a calculator). Make roughly half of each.`;
+const MATHS_WRITING_RULES = `- Write maths in plain text: fractions like 3/4, powers like x^2, roots like sqrt(49), × and ÷ for multiply and divide, no LaTeX, no $ signs, no Markdown. Put any units in the question; give units in the answer only if the question asks for them.
+- Every answer must be exactly right: work each question out twice. If the answer must be rounded, say how in the question. If an answer can be written another way (0.5, 1/2, 50%), give the other forms as alternatives.
+- Give a worked solution for every question: short numbered steps naming the rule or formula used and showing the numbers, finishing with the answer.`;
+export const mathsRules = (needsHow = true) => `${MATHS_PAPER_RULE}\n${needsHow ? MATHS_WRITING_RULES : MATHS_WRITING_RULES.split("\n").slice(0, 2).join("\n")}`;
+
+function splitTags(cells) {
+  let how = "", calc = "";
+  const rest = [];
+  for (const c of cells) {
+    let m;
+    if ((m = c.match(/^(?:how|working|method|solution|steps)\s*[:\-–]\s*([\s\S]+)$/i))) how = m[1];
+    else if ((m = c.match(/^paper\s*[:\-–]?\s*([\s\S]+)$/i)) && parseCalc(m[1])) calc = parseCalc(m[1]);
+    else rest.push(c);
+  }
+  return { how, calc, rest };
+}
+
 function toItem(parts, alts = [], src = "", marks = 0, extra = {}) {
   const cells = parts.map(clean);
   const q = cells[0];
   const a = cells[1];
   if (!q || !a) return null;
+  const tags = splitTags(cells.slice(2));
+  const how = clean(extra.how || tags.how).slice(0, 900);
+  const calc = parseCalc(extra.calc) || tags.calc;
+  const tagged = { ...(how ? { how } : {}), ...(calc ? { calc } : {}) };
   const m = Math.round(Number(marks));
   const exam = Number.isFinite(m) && m >= 1;
-  const choices = exam ? [] : [...new Set(cells.slice(2).filter(Boolean))].filter((c) => normalise(c) !== normalise(a)).slice(0, 5);
+  const choices = exam ? [] : [...new Set(tags.rest.filter(Boolean))].filter((c) => normalise(c) !== normalise(a)).slice(0, 5);
   const source = clean(src).slice(0, 80);
   if (exam) {
-    const item = { q: q.slice(0, 800), a: a.slice(0, 1200), choices: [], exam: true, marks: Math.min(12, m), ...(source ? { src: source } : {}) };
+    const item = { q: q.slice(0, 800), a: a.slice(0, 1200), choices: [], exam: true, marks: Math.min(12, m), ...(source ? { src: source } : {}), ...tagged };
     const kind = kindId(extra.kind);
     const hasOpts = extra.opts !== undefined && extra.opts !== null;
     if (hasOpts) { // exam multiple choice: options in a fixed order — pick one (1 mark) or "select two" (2 marks)
@@ -816,7 +854,7 @@ function toItem(parts, alts = [], src = "", marks = 0, extra = {}) {
     }
     return item;
   }
-  return { q: q.slice(0, 500), a: mergeAnswers(a.slice(0, 300), alts), choices: choices.map((c) => c.slice(0, 200)), ...(source ? { src: source } : {}) };
+  return { q: q.slice(0, 500), a: mergeAnswers(a.slice(0, 300), alts), choices: choices.map((c) => c.slice(0, 200)), ...(source ? { src: source } : {}), ...tagged };
 }
 
 function fromJson(text) {
@@ -837,7 +875,7 @@ function fromJson(text) {
       const wrong = row.wrong ?? row.choices ?? row.options ?? row.distractors ?? [];
       let alts = row.alt ?? row.alts ?? row.alternatives ?? row.also ?? row.accept ?? [];
       if (typeof alts === "string") alts = alts.split(/\s*[;|]\s*/);
-      item = toItem([q, a, ...(Array.isArray(wrong) ? wrong : [])], Array.isArray(alts) ? alts : [], typeof (row.src ?? row.source) === "string" ? (row.src ?? row.source) : "", row.marks ?? row.mark ?? 0, { opts: row.opts ?? row.options ?? row.mc, fig: row.fig ?? row.figure, kind: row.kind ?? row.type, ctx: row.ctx ?? row.context ?? row.extract ?? row.scenario, answers: row.answers });
+      item = toItem([q, a, ...(Array.isArray(wrong) ? wrong : [])], Array.isArray(alts) ? alts : [], typeof (row.src ?? row.source) === "string" ? (row.src ?? row.source) : "", row.marks ?? row.mark ?? 0, { opts: row.opts ?? row.options ?? row.mc, fig: row.fig ?? row.figure, kind: row.kind ?? row.type, ctx: row.ctx ?? row.context ?? row.extract ?? row.scenario, answers: row.answers, how: Array.isArray(row.how ?? row.working ?? row.solution ?? row.method ?? row.steps) ? (row.how ?? row.working ?? row.solution ?? row.method ?? row.steps).join(" ; ") : (row.how ?? row.working ?? row.solution ?? row.method ?? row.steps), calc: row.calc ?? row.paper });
     }
     if (item) items.push(item); else skipped++;
   }
@@ -1024,6 +1062,7 @@ export function buildAiPrompt({ topic, level = "GCSE", count = 15, style = "gapf
   const n = Math.max(1, Math.min(50, Math.round(Number(count)) || 15));
   const lvl = clean(level) || "GCSE";
   const tailor = boardLine(board, lvl);
+  const maths = isMathsSubject(subject, topic);
   if (mode === "exam") {
     const business = isBusinessSubject(subject, topic);
     const want = (Array.isArray(kinds) && kinds.length ? kinds : defaultExamKinds(subject, topic)).map(kindId).filter(Boolean);
@@ -1040,7 +1079,23 @@ ${used.map((k, i) => `${i + 1}. ${guides[i].shape}`).join("\n")}
 Rules:
 ${used.map((k, i) => `- ${k}: ${guides[i].rules}`).join("\n")}
 - Do not put the number of marks in the question text — the app shows it. Real command words only. Marking points must be factually correct and short.
-- No markdown, no numbering, no text outside the JSON.${business ? "\n- This is modelled on the Edexcel GCSE Business papers: questions about a made-up business, with 'Outline one…', 'Explain one…', 'Analyse the impact on…' and 'Justify…' command words." : ""}${paperLines(paper, board, lvl)}`;
+- No markdown, no numbering, no text outside the JSON.${maths ? `\n- ${mathsNotes(board)}\n- Add "paper": "1" or "2" and "how": "the worked solution as short numbered steps separated by ' ; '" to every object.\n${mathsRules(false)}` : ""}${business ? "\n- This is modelled on the Edexcel GCSE Business papers: questions about a made-up business, with 'Outline one…', 'Explain one…', 'Analyse the impact on…' and 'Justify…' command words." : ""}${paperLines(paper, board, lvl)}`;
+  }
+  if (maths) {
+    const wantsChoice = style === "choice" || (Array.isArray(styles) && styles.includes("choice"));
+    return `Write ${n} maths revision questions about "${t}" at ${lvl} level. ${mathsNotes(board)}${useEdexcelMaths(board) ? "" : tailor}
+
+Reply with ONLY the questions, one per line, in exactly this format:
+question | answer | paper: 1 | how: step 1 ; step 2 ; step 3${wantsChoice ? " | wrong option 1 | wrong option 2 | wrong option 3" : ""}
+
+Rules:
+- Each question is a calculation or problem with ONE clear final answer that can be typed (a number, an expression or a short phrase), the kind that appears on the real papers.
+- ${wantsChoice ? "Give 3 wrong options for every question, each one a realistic mistake students make (so each is multiple choice)." : "Do not include wrong options — every question is answered by typing."}
+${MATHS_PAPER_RULE.replace("- Tag every question with its paper.", '- Write "paper: 1" or "paper: 2" in the third column of every line.')}
+${MATHS_WRITING_RULES}
+- In the how: column write the steps separated by " ; " (a space, semicolon, space) and never use the "|" character inside any column.
+- One line per question. No numbering, headings, bullet points, bold text or intro/outro text.
+- Cover a range of ${useEdexcelMaths(board) ? "Edexcel" : ""} topics and don't repeat questions.${paperLines(paper, board, lvl)}`;
   }
   let styleLine = {
     typed: "Do not include wrong options — every question is answered by typing.",
@@ -1362,6 +1417,8 @@ export function sanitiseState(raw, catalogueIds = null) {
       id, subjectId, q: text, a: answer,
       choices: (Array.isArray(q.choices) ? q.choices : []).map((c) => str(c, 200)).filter(Boolean).slice(0, 5),
       ...(str(q.src, 80) ? { src: str(q.src, 80) } : {}),
+      ...(str(q.how, 900) ? { how: str(q.how, 900) } : {}),
+      ...(q.calc === "non" || q.calc === "calc" ? { calc: q.calc } : {}),
       ...(isExam ? { exam: true, marks: opts ? (answers ? 2 : 1) : Math.min(12, Math.round(q.marks)) } : {}),
       ...(kind ? { kind } : {}),
       ...(ctx ? { ctx } : {}),
