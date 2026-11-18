@@ -39,6 +39,15 @@ function safeStorage() {
 }
 
 // ---------- tiny helper for building page elements (text is always set as text, never as HTML) ----------
+/** Text with powers, roots and (optionally) fractions drawn the way exams print them. Returns a string when there is nothing to change. */
+function rich(text, fractions = false) {
+  const parts = L.mathParts(text, fractions);
+  if (!parts) return String(text ?? "");
+  return parts.map((p) => p.t === "sup" ? h("sup", { class: "rt-sup" }, rich(p.v))
+    : p.t === "root" ? h("span", { class: "rt-root" }, p.n === 3 ? h("span", { class: "rt-idx" }, "3") : null, "√", h("span", { class: "rt-ov" }, rich(p.v)))
+    : p.t === "frac" ? h("span", { class: "rt-frac" }, h("span", { class: "rt-n" }, p.n), h("span", { class: "rt-d" }, p.d))
+    : p.v);
+}
 function h(tag, props = {}, ...kids) {
   const el = document.createElement(tag);
   for (const [k, v] of Object.entries(props)) {
@@ -51,7 +60,9 @@ function h(tag, props = {}, ...kids) {
   }
   for (const kid of kids.flat()) {
     if (kid === null || kid === undefined || kid === false) continue;
-    el.append(typeof kid === "object" ? kid : document.createTextNode(String(kid)));
+    if (typeof kid === "object") el.append(kid);
+    else if (tag !== "option" && tag !== "textarea" && tag !== "title" && typeof kid === "string" && /[\^√∛]|sqrt|cbrt/.test(kid)) el.append(...[rich(kid)].flat().map((x) => (typeof x === "object" ? x : document.createTextNode(x))));
+    else el.append(document.createTextNode(String(kid)));
   }
   return el;
 }
@@ -1503,7 +1514,7 @@ function viewQuestion() {
   const body = h("div", {},
     h("div", { class: "row", style: "margin-top:.8rem" }, h("span", { class: "tag" }, subject ? subject.name : "Question"), q.exam && h("span", { class: "tag" }, `📝 ${markWord(q.marks)}`), q.exam && kindTag(q, subject && subject.name) && h("span", { class: "tag" }, kindTag(q, subject && subject.name)), q.calc && h("span", { class: "tag" }, L.calcLabel(q.calc, q.paper)), q.src && h("span", { class: "tag" }, `📄 ${q.src}`), item.retry && h("span", { class: "tag" }, "Second chance — no points")),
     ctxView(q, subject && subject.name),
-    h("p", { class: "quiz-q" }, q.q),
+    h("p", { class: "quiz-q" }, rich(q.q, true)),
     q.opts && q.opts.length && q.answers && h("p", { class: "small muted", style: "margin:-.4rem 0 .6rem" }, "Select two answers."),
     q.fig && figureView(q.fig));
 
@@ -1564,7 +1575,7 @@ function viewQuestion() {
         levelled && session.given && h("span", { class: "ans" }, r.level ? `Level ${r.level} of 3 (${bands[r.level - 1][0]}–${bands[r.level - 1][1]} marks)` : "Level 0 — nothing rewardable yet"),
         session.given && h("span", { class: "ans" }, `You wrote: ${session.given}`)),
         levelled && h("p", { class: "small", style: "margin:.6rem 0 .2rem" }, h("b", {}, session.given ? "What a good answer could include:" : "What a good answer could include:")),
-        h("ul", { style: "list-style:none;margin:.6rem 0;padding:0" }, r.points.map((x) => h("li", { style: "padding:.15rem 0" }, `${x.met ? "✅" : levelled ? "⬜" : "❌"} ${x.text}`))),
+        h("ul", { style: "list-style:none;margin:.6rem 0;padding:0" }, r.points.map((x) => h("li", { style: "padding:.15rem 0" }, [`${x.met ? "✅" : levelled ? "⬜" : "❌"} `, rich(x.text, true)]))),
         (q.how || L.isMathsSubject((subject && subject.name) || "", "")) && whyBox(q, passed),
         levelled && h("p", { class: "small muted", style: "margin:0 0 .5rem" }, `Marked in levels: Level 1 (${bands[0][0]}–${bands[0][1]}) simple points; Level 2 (${bands[1][0]}–${bands[1][1]}) applied to the question, with some reasoning; Level 3 (${bands[2][0]}–${bands[2][1]}) developed, logical chains of reasoning${q.marks >= 9 ? " and a justified judgement" : ""}.`),
         ...(r.feedback ? [h("p", {}, r.feedback)] : []),
@@ -1597,7 +1608,7 @@ function viewQuestion() {
     body.append(h("div", { class: "verdict " + (ok ? "good" : "bad"), role: "status" },
       ok ? (session.aiAccepted ? "✅ Counts as correct!" : "✅ Correct!") : session.dontKnow ? "No problem — here's the answer:" : "❌ Not quite",
       session.given && !session.shown.options && h("span", { class: "ans" }, `You wrote: ${session.given}`),
-      !ok || session.shown.options || session.aiAccepted || !sameAsAnswer(session.given, q.a) ? h("span", { class: "ans" }, `${ok && !session.shown.options ? "Exact answer" : "Answer"}: ${right}`) : null));
+      !ok || session.shown.options || session.aiAccepted || !sameAsAnswer(session.given, q.a) ? h("span", { class: "ans" }, `${ok && !session.shown.options ? "Exact answer" : "Answer"}: `, rich(right, true)) : null));
     body.append(whyBox(q, ok));
     const last = session.index >= total - 1 && !(!ok && !item.retry);
     const next = h("button", { class: "primary", onclick: () => commit(ok) }, last ? "Finish" : "Next →");
@@ -1799,11 +1810,11 @@ function toggleSound() {
 /** "Why?" box shown after every answer: for a wrong one the AI says why you may have got confused, and for every answer why the right answer is what it is. Needs a login; otherwise it says so. */
 /** Shows steps one per line. Accepts "Step 1: … ; Step 2: …" or one step per line. */
 const stepsView = (text) => h("ol", { style: "margin:.4rem 0 0 1.2rem;padding:0" },
-  String(text).split(/\s+;\s+|\n+/).map((x) => x.replace(/^\s*(step\s*\d+\s*[:.)-]?|\d+\s*[.)])\s*/i, "").trim()).filter(Boolean).map((x) => h("li", { style: "margin:.25rem 0" }, x)));
+  String(text).split(/\s+;\s+|\n+/).map((x) => x.replace(/^\s*(step\s*\d+\s*[:.)-]?|\d+\s*[.)])\s*/i, "").trim()).filter(Boolean).map((x) => h("li", { style: "margin:.25rem 0" }, rich(x, true))));
 /** The AI's maths method: one line each, with "Step 1:", "Answer:" and "Tip:" in bold. */
 const methodLines = (text) => h("div", {}, String(text).split("\n").filter((x) => x.trim()).map((line) => {
   const m = line.match(/^\s*(Step\s*\d+|Answer|Tip)\s*[:.]\s*(.*)$/i);
-  return h("p", { style: "margin:.3rem 0" }, m ? [h("b", {}, `${m[1]}: `), m[2]] : line);
+  return h("p", { style: "margin:.3rem 0" }, m ? [h("b", {}, `${m[1]}: `), rich(m[2], true)] : rich(line, true));
 }));
 function whyBox(q, ok = false) {
   const key = `${session.index}:${session.given}`;
@@ -2057,7 +2068,7 @@ function openBoardQuiz(startSubjectId, onPick) {
       return [
         picker(),
         h("p", { class: "small muted", style: "margin:0 0 .3rem" }, `${name} · question ${step + 1} of ${qs.length}`),
-        h("h2", { id: "bq-title", style: "font-size:1.05rem" }, q.q),
+        h("h2", { id: "bq-title", style: "font-size:1.05rem" }, rich(q.q, true)),
         h("div", { style: "display:grid;gap:.4rem;margin-top:.7rem" }, q.options.map(([label], i) => h("button", { type: "button", class: answers[q.id] === i ? "primary" : "", style: "text-align:left", onclick: () => { answers[q.id] = i; step += 1; draw(); } }, label))),
         h("div", { class: "row", style: "justify-content:space-between;margin-top:.8rem" },
           h("button", { type: "button", class: "ghost small", disabled: step === 0, onclick: () => { step -= 1; draw(); } }, "← Back"),
@@ -2260,7 +2271,7 @@ function viewQuestions() {
       p.skipped > 0 && h("p", { class: "small muted" }, `${plural(p.skipped, "line")} couldn't be read and ${p.skipped === 1 ? "was" : "were"} skipped.`),
       p.items.map((it) => h("label", { class: "pick" },
         h("input", { type: "checkbox", checked: it.keep, onchange: (e) => { it.keep = e.target.checked; render(); } }),
-        h("span", {}, h("b", {}, it.q),
+        h("span", {}, h("b", {}, rich(it.q, true)),
           it.fig && figureView(it.fig),
           it.opts && h("span", { class: "a" }, it.opts.map((o, i) => `${LETTERS[i]}. ${o}`).join("    ")),
           it.ctx && h("span", { class: "a" }, `Case study: ${it.ctx}`),
@@ -2290,7 +2301,7 @@ function viewQuestions() {
     listBox.replaceChildren(...[
       shown.length === 0 && h("p", { class: "muted" }, state.questions.length ? "No questions match." : "No questions yet."),
       ...shown.slice(0, 150).map((q) => h("div", { class: "item" },
-        h("div", { class: "txt" }, h("div", {}, q.q), q.exam && h("div", { class: "small muted" }, `📝 ${kindTag(q, ((state.subjects.find((s) => s.id === q.subjectId) || {}).name) || "") ? kindTag(q, ((state.subjects.find((s) => s.id === q.subjectId) || {}).name) || "") + " · " : ""}${markWord(q.marks)}`),
+        h("div", { class: "txt" }, h("div", {}, rich(q.q, true)), q.exam && h("div", { class: "small muted" }, `📝 ${kindTag(q, ((state.subjects.find((s) => s.id === q.subjectId) || {}).name) || "") ? kindTag(q, ((state.subjects.find((s) => s.id === q.subjectId) || {}).name) || "") + " · " : ""}${markWord(q.marks)}`),
           q.ctx && h("div", { class: "a" }, `Case study: ${q.ctx}`),
           h("div", { class: "a" }, q.opts ? `Multiple choice — correct: ${correctLabels(q)}` : q.exam ? `Mark scheme (${markWord(q.marks)}): ${q.a}` : `Answer: ${q.a}${q.choices.length ? "  ·  multiple choice" : ""}`),
           q.fig && h("div", { class: "small muted" }, `📊 Includes a ${q.fig.type === "table" ? "table" : q.fig.type === "shape" ? "diagram" : q.fig.type + " chart"}${q.fig.title ? ": " + q.fig.title : ""}`),

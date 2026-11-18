@@ -1879,3 +1879,25 @@ Rules:
 - Only list actual exams. Skip breaks, lunches, registration and instructions.
 - Reply with ONLY the lines, no heading, no table, no numbering, no explanation.`;
 }
+
+// ---------- maths text: powers, roots and fractions written the way exams print them ----------
+const MATH_RE = /\^(?:\{[^}]{1,12}\}|\([^)]{1,12}\)|[-−+]?(?:\d+(?:\.\d+)?|[a-zA-Z]))|(?:√|∛|\bsqrt|\bcbrt)\s*(?:\([^)]{1,40}\)|\d+(?:\.\d+)?|[a-zA-Z])|(?<![\w./])\d+(?:\.\d+)?\/\d+(?:\.\d+)?(?![\w./])/g;
+/** Splits text into plain pieces and maths pieces: {t:"sup",v}, {t:"root",n:2|3,v}, {t:"frac",n,d}. Fractions are only found when `fractions` is true. */
+export function mathParts(text, fractions = false) {
+  const src = String(text ?? "");
+  const out = []; let last = 0, m;
+  MATH_RE.lastIndex = 0;
+  while ((m = MATH_RE.exec(src))) {
+    const t = m[0];
+    let piece = null;
+    if (t[0] === "^") piece = { t: "sup", v: t.slice(1).replace(/^[{(]|[})]$/g, "").replace(/-/g, "−") };
+    else if (/\//.test(t) && /^\d/.test(t)) { if (fractions) { const [n, d] = t.split("/"); piece = { t: "frac", n, d }; } }
+    else { const cube = /^(∛|cbrt)/i.test(t); piece = { t: "root", n: cube ? 3 : 2, v: t.replace(/^(√|∛|sqrt|cbrt)\s*/i, "").replace(/^\(|\)$/g, "") }; }
+    if (!piece) continue;
+    if (m.index > last) out.push({ t: "text", v: src.slice(last, m.index) });
+    out.push(piece); last = m.index + t.length;
+  }
+  if (!out.length) return null;
+  if (last < src.length) out.push({ t: "text", v: src.slice(last) });
+  return out;
+}

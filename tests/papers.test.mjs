@@ -30,3 +30,13 @@ test("maths diagrams are checked and drawn", () => {
   assert.equal(L.cleanFigure({ type: "shape", shape: "dragon", labels: { r: "1" } }), null);
   assert.ok(L.examFormats("Maths").figures.includes("shape"));
 });
+
+test("maths text: powers, roots and fractions are found", () => {
+  const p = L.mathParts("Calculate 4.8 × 10^6 ÷ 1.6 × 10^-3.");
+  assert.deepEqual(p.filter((x) => x.t === "sup").map((x) => x.v), ["6", "−3"]);
+  assert.deepEqual(L.mathParts("Work out √81 and sqrt(2x) and cbrt(27)").filter((x) => x.t === "root").map((x) => [x.n, x.v]), [[2, "81"], [2, "2x"], [3, "27"]]);
+  assert.equal(L.mathParts("8/25 × 7/24"), null);
+  assert.equal(L.mathParts("8/25 × 7/24", true).filter((x) => x.t === "frac").length, 2);
+  assert.equal(L.mathParts("12/05/2024", true), null);
+  assert.equal(L.mathParts("plain words"), null);
+});
