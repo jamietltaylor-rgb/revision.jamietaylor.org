@@ -1102,11 +1102,17 @@ export function boardForSubject(settings, subjectId) {
 
 export const BOARDS = ["Any exam board", "AQA", "Edexcel", "OCR", "WJEC / Eduqas", "CCEA", "SQA"];
 
-export function buildAiPrompt({ topic, level = "GCSE", count = 15, style = "gapfill", styles, paper = false, board = "", mode = "quick", kinds, subject = "", mathsPaper = "all" } = {}) {
+export const paperPrompt = (board, paperName) => {
+  const p = String(paperName || "").replace(/\s+/g, " ").trim().slice(0, 100);
+  if (!p) return "";
+  return ` Write them for ${board && board !== "Any exam board" ? board + " " : ""}${p}: the topics, question styles and marks that this paper really has, and nothing that belongs on a different paper.`;
+};
+
+export function buildAiPrompt({ topic, level = "GCSE", count = 15, style = "gapfill", styles, paper = false, board = "", mode = "quick", kinds, subject = "", mathsPaper = "all", paperName = "" } = {}) {
   const t = clean(topic).slice(0, 120) || "[type your topic here]";
   const n = Math.max(1, Math.min(50, Math.round(Number(count)) || 15));
   const lvl = clean(level) || "GCSE";
-  const tailor = boardLine(board, lvl);
+  const tailor = boardLine(board, lvl) + paperPrompt(board, paperName);
   const maths = isMathsSubject(subject, topic);
   if (mode === "exam") {
     const business = isBusinessSubject(subject, topic);
@@ -1466,6 +1472,7 @@ export function sanitiseState(raw, catalogueIds = null) {
       ...(str(q.how, 900) ? { how: str(q.how, 900) } : {}),
       ...(q.calc === "non" || q.calc === "calc" ? { calc: q.calc } : {}),
       ...(["1", "2", "3"].includes(q.paper) ? { paper: q.paper } : {}),
+      ...(str(q.paperName, 100) ? { paperName: str(q.paperName, 100) } : {}),
       ...(isExam ? { exam: true, marks: opts ? (answers ? 2 : 1) : Math.min(12, Math.round(q.marks)) } : {}),
       ...(kind ? { kind } : {}),
       ...(ctx ? { ctx } : {}),

@@ -2,6 +2,7 @@ import * as L from "./logic.js";
 import * as Shop from "./shop.js";
 import { CONFIG } from "./config.js";
 import { findGuide } from "./examguides.js";
+import { papersFor } from "./papers.js";
 import { SECTIONS as TUTORIAL } from "./tutorial.js";
 import { createCloud, displayName } from "./cloud.js";
 
@@ -27,6 +28,7 @@ let retryDelay = 15000;
 let lastChest = null;
 const auth = { mode: "in", username: "", password: "", confirm: "", error: "", busy: false };
 const draft = {
+  paperName: "",
   subjectId: "", newSubject: "", q: "", a: "", wrong: "",
   topic: "", level: "GCSE", count: "10", style: "gapfill", styles: ["gapfill"], busy: false, progress: "", aiError: "", prompt: "", paper: false, board: "Any exam board", boardInit: false, mode: "quick", kinds: null, allKinds: false,
   pet: "buddy", paste: "", preview: null, filter: "all", search: "", treatName: "", treatCost: "",
@@ -1348,6 +1350,8 @@ function viewRevise() {
 }
 
 let reviseMode = "quick"; // "quick" = short answers, "exam" = complete exam questions
+let reviseSubject = "all";
+let revisePaperName = "";
 let revisePaper = "all"; // maths: all, non (Paper 1, no calculator) or calc (Papers 2 and 3)
 let reviseKind = "all"; // which exam questions to practise: all, mc (1–2 mark multiple choice), short (outline / explain) or long (6 and 9 markers)
 const KIND_GROUPS = {
@@ -1380,9 +1384,18 @@ function viewSetup() {
         : "Quick questions have short answers. Add some in the Questions tab."),
       h("button", { class: "primary", onclick: () => { draft.mode = reviseMode; go("questions"); } }, "Go to Questions")));
   }
-  const subjectSel = h("select", { id: "subject" },
+  const subjectSel = h("select", { id: "subject", onchange: (e) => { reviseSubject = e.target.value; revisePaper = "all"; revisePaperName = ""; render(); } },
     h("option", { value: "all" }, `All subjects (${dueIn("all")} due)`),
     state.subjects.filter((s) => pool.some((q) => q.subjectId === s.id)).map((s) => h("option", { value: s.id }, `${s.name} (${dueIn(s.id)} due)`)));
+  if (![...subjectSel.options].some((o) => o.value === reviseSubject)) reviseSubject = "all";
+  subjectSel.value = reviseSubject;
+  const pickedSubject = state.subjects.find((s) => s.id === reviseSubject);
+  const boardOfPicked = pickedSubject ? (L.boardForSubject(state.settings, pickedSubject.id) || "Any exam board") : "Any exam board";
+  const paperList = pickedSubject && !L.isMathsSubject(pickedSubject.name, "") ? (papersFor(pickedSubject.name.replace(/\s*[–-]\s*exam questions$/i, ""), "", boardOfPicked) || []) : [];
+  const taggedNames = pickedSubject ? [...new Set(pool.filter((x) => x.subjectId === pickedSubject.id && x.paperName).map((x) => x.paperName))] : [];
+  const paperChoices = [...paperList, ...taggedNames.filter((n) => !paperList.includes(n))];
+  if (!paperChoices.includes(revisePaperName)) revisePaperName = "";
+  const showMathsPaper = !!pickedSubject && L.isMathsSubject(pickedSubject.name, "") && pool.some((x) => x.subjectId === pickedSubject.id && (x.calc || x.paper));
   const lengthSel = h("select", { id: "length" },
     reviseMode === "exam"
       ? [h("option", { value: "5" }, "Normal — 5 questions"), h("option", { value: "3" }, "Quick — 3 questions"), h("option", { value: "10" }, "Long — 10 questions")]
@@ -1399,16 +1412,20 @@ function viewSetup() {
     h("label", {}, "Subject", subjectSel),
     reviseMode === "exam" && h("label", {}, "Which kind of question?",
       h("select", { id: "kind", onchange: (e) => { reviseKind = e.target.value; } }, Object.entries(KIND_GROUPS).map(([v, [label]]) => h("option", { value: v, selected: v === reviseKind }, `${label}${v === "all" ? "" : ` (${pool.filter((q) => inKindGroup(q, v)).length})`}`)))),
-    state.questions.some((x) => x.calc) && h("label", {}, "Which maths paper?",
+    paperChoices.length > 0 && h("label", {}, "Which paper?",
+      h("select", { id: "paperNamePick", "aria-label": "Which paper", onchange: (e) => { revisePaperName = e.target.value; } },
+        h("option", { value: "" }, "All papers — mixed"),
+        paperChoices.map((n) => h("option", { value: n, selected: n === revisePaperName }, `${n} (${pool.filter((x) => x.subjectId === pickedSubject.id && x.paperName === n).length})`)))),
+    showMathsPaper && h("label", {}, "Which maths paper?",
       h("select", { id: "paperpick", "aria-label": "Which maths paper", onchange: (e) => { revisePaper = e.target.value; } },
         [["all", "All papers — mixed"], ["1", "Paper 1 — no calculator"], ["2", "Paper 2 — calculator"], ["3", "Paper 3 — calculator"], ["non", "Any non-calculator question"], ["calc", "Any calculator question"]].map(([v, label]) => h("option", { value: v, selected: v === revisePaper }, label)))),
     h("label", {}, "How many?", lengthSel),
-    h("button", { class: "primary big", onclick: () => startSession(subjectSel.value, lengthSel.value, reviseMode, reviseMode === "exam" ? reviseKind : "all", revisePaper) }, "Start"));
+    h("button", { class: "primary big", onclick: () => startSession(subjectSel.value, lengthSel.value, reviseMode, reviseMode === "exam" ? reviseKind : "all", revisePaper, revisePaperName) }, "Start"));
 }
 
-function startSession(subjectId, length, mode = null, kindGroup = "all", paper = "all") {
+function startSession(subjectId, length, mode = null, kindGroup = "all", paper = "all", paperName = "") {
   const t = today();
-  const pool = (mode ? ofMode(mode) : state.questions).filter((q) => inKindGroup(q, kindGroup) && (paper === "all" || q.calc === paper || q.paper === paper));
+  const pool = (mode ? ofMode(mode) : state.questions).filter((q) => inKindGroup(q, kindGroup) && (paper === "all" || q.calc === paper || q.paper === paper) && (!paperName || q.paperName === paperName));
   const dueCount = pool.filter((q) => (subjectId === "all" || q.subjectId === subjectId) && q.due <= t).length;
   const count = length === "due" ? Math.max(dueCount, 1) : length === "all" ? Infinity : Number(length) || 10;
   const { picked } = L.pickQuestions(pool, { subjectId, count, today: t });
@@ -1875,7 +1892,7 @@ function ensureSubject(fallbackName = "") {
   }
   return draft.subjectId;
 }
-const makeQuestion = (subjectId, q, a, choices = [], src = "", exam = null, extra = {}) => ({ id: L.uid(), subjectId, q, a, choices, ...(src ? { src: String(src).slice(0, 80) } : {}), ...(exam ? { exam: true, marks: exam.marks, ...(exam.kind ? { kind: exam.kind } : {}), ...(exam.ctx ? { ctx: exam.ctx } : {}), ...(exam.opts ? { opts: exam.opts } : {}), ...(exam.answers ? { answers: exam.answers, pick: 2 } : {}), ...(exam.fig ? { fig: exam.fig } : {}) } : {}), ...(extra.how ? { how: extra.how } : {}), ...(extra.calc ? { calc: extra.calc } : {}), ...(extra.paper ? { paper: extra.paper } : {}), box: 1, due: today(), right: 0, wrong: 0 });
+const makeQuestion = (subjectId, q, a, choices = [], src = "", exam = null, extra = {}) => ({ id: L.uid(), subjectId, q, a, choices, ...(src ? { src: String(src).slice(0, 80) } : {}), ...(exam ? { exam: true, marks: exam.marks, ...(exam.kind ? { kind: exam.kind } : {}), ...(exam.ctx ? { ctx: exam.ctx } : {}), ...(exam.opts ? { opts: exam.opts } : {}), ...(exam.answers ? { answers: exam.answers, pick: 2 } : {}), ...(exam.fig ? { fig: exam.fig } : {}) } : {}), ...(extra.how ? { how: extra.how } : {}), ...(extra.calc ? { calc: extra.calc } : {}), ...(extra.paper ? { paper: extra.paper } : {}), ...(extra.paperName ? { paperName: String(extra.paperName).slice(0, 100) } : {}), box: 1, due: today(), right: 0, wrong: 0 });
 
 function addQuestion() {
   const q = draft.q.trim();
@@ -1936,7 +1953,7 @@ async function makeWithAi() {
       const part = remaining ? remaining.slice(0, chunk) : null;
       const ask = part ? part.length : Math.min(chunk, total - items.length);
       if (!ask) break;
-      const r = await cloud.generate({ mathsPaper: draft.mathsPaper || "all", topic, subject: chosenSubjectName(), level: draft.level, count: ask, style: draft.style, styles: draft.styles, paper: draft.paper, board: draft.board, mode: draft.mode, ...(part ? { kinds, plan: part } : {}), avoid: items.slice(-30).map((x) => x.q) });
+      const r = await cloud.generate({ paperName: draft.paperName, mathsPaper: draft.mathsPaper || "all", topic, subject: chosenSubjectName(), level: draft.level, count: ask, style: draft.style, styles: draft.styles, paper: draft.paper, board: draft.board, mode: draft.mode, ...(part ? { kinds, plan: part } : {}), avoid: items.slice(-30).map((x) => x.q) });
       const got = (Array.isArray(r && r.questions) ? r.questions : []).filter((x) => x && x.q && x.a);
       let fresh = 0;
       for (const x of got) {
@@ -1975,7 +1992,7 @@ async function checkMaker() {
   }
 }
 async function copyPrompt() {
-  draft.prompt = L.buildAiPrompt({ mathsPaper: draft.mathsPaper || "all", topic: draft.topic, level: draft.level, count: wantedCount(), style: draft.style, styles: draft.styles, paper: draft.paper, board: draft.board, mode: draft.mode, subject: chosenSubjectName(), ...(draft.mode === "exam" ? { kinds: examKinds() } : {}) });
+  draft.prompt = L.buildAiPrompt({ paperName: draft.paperName, mathsPaper: draft.mathsPaper || "all", topic: draft.topic, level: draft.level, count: wantedCount(), style: draft.style, styles: draft.styles, paper: draft.paper, board: draft.board, mode: draft.mode, subject: chosenSubjectName(), ...(draft.mode === "exam" ? { kinds: examKinds() } : {}) });
   let copied = false;
   try { await navigator.clipboard.writeText(draft.prompt); copied = true; } catch { copied = false; }
   toast(copied ? "Prompt copied — paste it into another AI ✓" : "Copy the prompt from the box below.");
@@ -1996,7 +2013,7 @@ function addPreview() {
     if (!made) return toast("You have too many subjects already — delete one first.");
     examSubjectId = made.id;
   }
-  for (const it of keep) state.questions.push(it.exam ? makeQuestion(examSubjectId, it.q, it.a, [], it.src || "", { marks: it.marks, opts: it.opts, answers: it.answers, kind: it.kind, ctx: it.ctx, fig: it.fig }, { how: it.how, calc: it.calc, paper: it.paper }) : makeQuestion(subjectId, it.q, it.a, it.choices || [], it.src || "", null, { how: it.how, calc: it.calc, paper: it.paper }));
+  for (const it of keep) state.questions.push(it.exam ? makeQuestion(examSubjectId, it.q, it.a, [], it.src || "", { marks: it.marks, opts: it.opts, answers: it.answers, kind: it.kind, ctx: it.ctx, fig: it.fig }, { how: it.how, calc: it.calc, paper: it.paper, paperName: draft.paperName }) : makeQuestion(subjectId, it.q, it.a, it.choices || [], it.src || "", null, { how: it.how, calc: it.calc, paper: it.paper, paperName: draft.paperName }));
   state.stats.created += keep.length;
   draft.preview = null; draft.paste = ""; draft.prompt = "";
   checkBadges();
@@ -2138,7 +2155,7 @@ function viewQuestions() {
     h("h2", {}, "Which subject?"),
     h("p", { class: "muted small" }, "New questions go into this subject."),
     state.subjects.length > 0 && h("label", {}, "Add to",
-      h("select", { id: "form-subject", onchange: (e) => { draft.subjectId = e.target.value; draft.board = L.boardForSubject(state.settings, draft.subjectId) || "Any exam board"; render(); } },
+      h("select", { id: "form-subject", onchange: (e) => { draft.subjectId = e.target.value; draft.paperName = ""; draft.board = L.boardForSubject(state.settings, draft.subjectId) || "Any exam board"; render(); } },
         state.subjects.map((s) => h("option", { value: s.id, selected: s.id === draft.subjectId }, s.name)),
         h("option", { value: "__new", selected: draft.subjectId === "__new" }, "＋ New subject…"))),
     (draft.subjectId === "__new" || !state.subjects.length) && h("label", {}, "New subject name",
@@ -2162,7 +2179,16 @@ function viewQuestions() {
           draft.style = draft.styles[0];
           render();
         } }, l)))),
-      h("label", {}, "Exam board", h("select", { "aria-label": "Exam board", onchange: (e) => { draft.board = e.target.value; setBoardFor(draft.subjectId, e.target.value); save(); render(); } }, L.BOARDS.map((x) => opt(x, x, draft.board)))),
+      h("label", {}, "Exam board", h("select", { "aria-label": "Exam board", onchange: (e) => { draft.board = e.target.value; draft.paperName = ""; setBoardFor(draft.subjectId, e.target.value); save(); render(); } }, L.BOARDS.map((x) => opt(x, x, draft.board)))),
+      (() => {
+        if (L.isMathsSubject(chosenSubjectName(), draft.topic)) return null; // maths has its own paper picker below
+        const list = papersFor(chosenSubjectName(), draft.topic, draft.board);
+        if (draft.board === "Any exam board") return h("p", { class: "small muted", style: "margin:.2rem 0 .5rem" }, "Pick your exam board above and I'll list its papers for this subject.");
+        if (list) return h("label", {}, "Which paper?",
+          h("select", { "aria-label": "Which paper", onchange: (e) => { draft.paperName = e.target.value; } },
+            h("option", { value: "" }, "Any paper — mixed"), list.map((x) => h("option", { value: x, selected: draft.paperName === x }, x))));
+        return h("label", {}, "Which paper? (optional)", h("input", { type: "text", maxlength: 80, placeholder: "e.g. Paper 2", value: draft.paperName, oninput: (e) => { draft.paperName = e.target.value; } }));
+      })(),
       (draft.wasMaths = L.isMathsSubject(chosenSubjectName(), draft.topic)) && h("div", { class: "card", style: "margin:.6rem 0;padding:.7rem .9rem;border:2px solid var(--accent)" },
         h("label", {}, "📐 Which maths paper? (Edexcel)",
           h("select", { "aria-label": "Which maths paper", onchange: (e) => { draft.mathsPaper = e.target.value; render(); } },

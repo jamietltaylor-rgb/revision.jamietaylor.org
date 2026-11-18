@@ -3,7 +3,7 @@
 // Setup: README step 4 (add an "AI" binding, plus SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY variables).
 
 import { guideForQuestions } from "../../public/examguides.js";
-import { parseQuestionList, BOARDS, boardLine, examFormats, refersToMissingFigure, EXAM_KINDS, kindId, examKindOf, examPlan, examKindGuide, defaultExamKinds, examProfile, isBusinessSubject, isMathsSubject, mathsNotes, mathsRules, mathsPaperRule, mathsStyleRule } from "../../public/logic.js";
+import { paperPrompt, parseQuestionList, BOARDS, boardLine, examFormats, refersToMissingFigure, EXAM_KINDS, kindId, examKindOf, examPlan, examKindGuide, defaultExamKinds, examProfile, isBusinessSubject, isMathsSubject, mathsNotes, mathsRules, mathsPaperRule, mathsStyleRule } from "../../public/logic.js";
 
 const MODELS = ["@cf/meta/llama-3.3-70b-instruct-fp8-fast", "@cf/meta/llama-3.1-8b-instruct"];
 const STYLES = ["typed", "choice", "gapfill", "mixed"];
@@ -43,6 +43,7 @@ function readRequest(body) {
   const mathsPaper = ["1", "2", "3"].includes(String(body.mathsPaper)) ? String(body.mathsPaper) : "all";
   const subject = String(body.subject || "").replace(/\s+/g, " ").trim().slice(0, 60);
   const board = BOARDS.includes(body.board) ? body.board : "Any exam board";
+  const paperName = String(body.paperName || "").replace(/\s+/g, " ").trim().slice(0, 100);
   let kinds = null, plan = [];
   if (mode === "exam") {
     // Which kinds of exam question to write. Chosen kinds are honoured as given (so multiple choice can be asked for in any subject);
@@ -55,9 +56,9 @@ function readRequest(body) {
     plan = given.length ? given : examPlan(count, kinds);
     count = plan.length || count;
     kinds = PAPER_ORDER.filter((k) => kinds.includes(k));
-    return { topic, level, count, style, styles, avoid, paper, board, mode, subject, kinds, plan, explicit, mathsPaper };
+    return { topic, level, count, style, styles, avoid, paper, board, mode, subject, kinds, plan, explicit, mathsPaper, paperName };
   }
-  return { topic, level, count, style, styles, avoid, paper, board, mode, subject, mathsPaper };
+  return { topic, level, count, style, styles, avoid, paper, board, mode, subject, mathsPaper, paperName };
 }
 
 const FIGURE_SHAPES = {
@@ -107,6 +108,13 @@ const STYLE_PARTS = {
 };
 const multiStyleRule = (styles) => `Make a mix of these kinds of question, in roughly equal numbers and in a mixed-up order: ${styles.map((x) => STYLE_PARTS[x]).join("; ")}.`;
 const useEdexcelMathsBoard = (board) => !board || board === "Any exam board" || board === "Edexcel";
+function withPaper(messages, req) {
+  const extra = paperPrompt(req.board, req.paperName);
+  if (!extra || !messages.length) return messages;
+  const out = messages.slice(), last = out.length - 1;
+  out[last] = { ...out[last], content: out[last].content + "\n\n" + extra.trim() };
+  return out;
+}
 function buildMessages({ topic, level, count, style, styles = [], avoid = [], paper = false, board = "", mode = "quick", subject = "", plan = [], kinds = [], mathsPaper = "all" }) {
   if (mode === "exam") return buildExamMessages({ topic, level, count, avoid, paper, board, subject, plan, kinds, mathsPaper });
   const styleRule = {
@@ -233,7 +241,7 @@ export async function onRequestPost({ request, env }) {
   for (const model of attempts) {
     if (quota) break;
     try {
-      const out = await env.AI.run(model, { messages: buildMessages(req), max_tokens: req.mode === "exam" ? 6000 : isMathsSubject(req.subject, req.topic) ? 4000 : 2500, temperature: 0.3 });
+      const out = await env.AI.run(model, { messages: withPaper(buildMessages(req), req), max_tokens: req.mode === "exam" ? 6000 : isMathsSubject(req.subject, req.topic) ? 4000 : 2500, temperature: 0.3 });
       let items = extract(out && out.response !== undefined ? out.response : out, req.mode, req.subject, req.topic, req.kinds);
       if (req.mode === "quick" && req.styles.length === 1 && req.styles[0] === "gapfill") items = items.filter((it) => /_{2,}|\.{4,}|…{2,}/.test(it.q)); // a gap fill needs its gap
       const seen = new Set();
