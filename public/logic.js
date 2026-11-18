@@ -938,9 +938,27 @@ function fromBlocks(lines) {
  *   "question :: answer", "question — answer", Q:/A: blocks, or a JSON list.
  * Never throws; returns { items: [{q, a, choices}], skipped, format }.
  */
+/** Cleans up copy-and-paste mess from chat apps: HTML codes like &#x20;, a backslash at the end of every line, escaped brackets, code fences. */
+export function tidyPasted(text) {
+  const named = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " " };
+  return String(text ?? "")
+    .replace(/&#x([0-9a-f]+);/gi, (_, h) => { const n = parseInt(h, 16); return n > 0 && n < 0x110000 ? String.fromCodePoint(n) : ""; })
+    .replace(/&#(\d+);/g, (_, d) => { const n = Number(d); return n > 0 && n < 0x110000 ? String.fromCodePoint(n) : ""; })
+    .replace(/&(amp|lt|gt|quot|apos|nbsp);/gi, (_, n) => named[n.toLowerCase()])
+    .replace(/[\u00a0\u200b]/g, " ")
+    .replace(/^```[a-z]*\s*$/gim, "")
+    .replace(/\\[ \t]*$/gm, "") // a backslash at the end of a line (a "hard line break" from chat apps)
+    .replace(/\\([\[\]{}()_*#<>~`+!.-])/g, "$1") // escaped markdown characters
+    .trim();
+}
+
 export function parseQuestionList(text) {
-  const src = String(text ?? "").replace(/^```[a-z]*\s*$/gim, "").trim();
+  let src = tidyPasted(text);
   if (!src) return { items: [], skipped: 0, format: "empty" };
+  if (!/^[\[{]/.test(src)) { // some chat text before a JSON list: use just the list
+    const a = src.indexOf("["), b = src.lastIndexOf("]");
+    if (a !== -1 && b > a && /\{\s*"/.test(src.slice(a, b))) { const j = fromJson(src.slice(a, b + 1)); if (j && j.items.length) return { ...j, items: j.items.slice(0, MAX_PASTE), format: "json" }; }
+  }
 
   if (/^[\[{]/.test(src)) {
     const j = fromJson(src);
@@ -1641,7 +1659,7 @@ export function parseExamList(text, today) {
   const exams = [];
   let skipped = 0;
   let heading = ""; // the date from the latest "Monday 9th November" line that had no exam on it
-  const cleaned = String(text ?? "").replace(/^```[a-z]*\s*$/gim, "");
+  const cleaned = tidyPasted(text);
   for (const raw of cleaned.split(/\r?\n/).slice(0, 400)) {
     const line = stripNumber(raw.trim());
     if (!line || /^[|\s:-]+$/.test(line)) continue;

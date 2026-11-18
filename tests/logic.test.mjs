@@ -871,3 +871,15 @@ test("maths: paper numbers, stray paper codes and junk answers", () => {
   assert.match(L.buildAiPrompt({ topic: "Algebra", subject: "Maths", mathsPaper: "3" }), /paper: 3/);
   assert.match(L.buildAiPrompt({ topic: "Algebra", subject: "Maths" }), /Do NOT put paper codes/);
 });
+
+test("pasted text from chat apps: &#x20; codes and trailing backslashes are cleaned up", () => {
+  const messy = '[\\\n&#x20; {\\\n&#x20; "q": "Two counters are taken from 25 without replacement, 8 are red. Work out the probability both are red.",\\\n&#x20; "a": "M1 for 8/25 × 7/24 ; M1 for 56/600 ; A1 for 7/75",\\\n&#x20; "marks": 3,\\\n&#x20; "paper": "2",\\\n&#x20; "how": "1. Probability of first red counter = 8/25 ; 2. Probability of second red counter = 7/24 ; 3. Multiply and simplify 56/600 = 7/75"\\\n&#x20; }\\\n]';
+  const r = L.parseQuestionList(messy);
+  assert.equal(r.items.length, 1);
+  assert.equal(r.items[0].paper, "2");
+  assert.equal(r.items[0].calc, "calc");
+  assert.match(r.items[0].how, /Multiply and simplify/);
+  assert.equal(r.items[0].marks, 3);
+  assert.equal(L.parseQuestionList("Here you go:\n```json\n[{\"q\":\"2+2\",\"a\":\"4\"}]\n```").items.length, 1);
+  assert.equal(L.tidyPasted("a&amp;b &#39;x&#39;\\"), "a&b 'x'");
+});
