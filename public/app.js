@@ -1540,7 +1540,7 @@ function viewQuestion() {
           ok ? "✅ Correct! 2 out of 2 marks" : session.dontKnow ? "No problem — here are the answers:" : `${got ? "➖" : "❌"} ${got} out of 2 marks`,
           session.picked && session.picked.length ? h("span", { class: "ans" }, `You chose: ${session.picked.map((o) => optLabel(q, o)).join("  +  ")}`) : null,
           !ok && h("span", { class: "ans" }, `Correct answers: ${correctLabels(q)}`)),
-          h("div", { class: "row" }, h("button", { class: "primary", onclick: () => commit(ok) }, "Next →")));
+          h("div", { class: "row" }, h("button", { class: "primary", onclick: () => commit(ok) }, "Next →"), !ok && !(session.queue[session.index] || {}).retry && h("button", { class: "ghost", onclick: () => commit(ok, true) }, "Got it — next, don't repeat it")));
       } else {
         const ok = session.verdict;
         body.append(h("div", { class: "verdict " + (ok ? "good" : "bad"), role: "status" },
@@ -1548,7 +1548,7 @@ function viewQuestion() {
           session.given && h("span", { class: "ans" }, `You chose: ${optLabel(q, session.given)}`),
           !ok && h("span", { class: "ans" }, `Correct answer: ${optLabel(q, q.a)}`)),
           whyBox(q, ok),
-          h("div", { class: "row" }, h("button", { class: "primary", onclick: () => commit(ok) }, "Next →")));
+          h("div", { class: "row" }, h("button", { class: "primary", onclick: () => commit(ok) }, "Next →"), !ok && !(session.queue[session.index] || {}).retry && h("button", { class: "ghost", onclick: () => commit(ok, true) }, "Got it — next, don't repeat it")));
       }
       return h("section", { class: "card" }, head, body);
     }
@@ -1582,6 +1582,7 @@ function viewQuestion() {
         h("p", { class: "small muted" }, r.source === "ai" ? "Marked by AI — it's a good guide but not perfect." : r.source === "local" ? "Marked by matching key words (the AI marker wasn't available), so it can miss answers worded differently." : "Here is the mark scheme."),
         h("div", { class: "row" },
           h("button", { class: "primary", onclick: () => commit(passed) }, "Next →"),
+          !passed && !(session.queue[session.index] || {}).retry && h("button", { class: "ghost", onclick: () => commit(passed, true) }, "Got it — next, don't repeat it"),
           session.given && h("button", { class: "ghost small", onclick: () => commit(!passed) }, passed ? "I disagree — count it as not yet" : "I disagree — count it as right")));
     }
     return h("section", { class: "card" }, head, body);
@@ -1612,7 +1613,8 @@ function viewQuestion() {
     body.append(whyBox(q, ok));
     const last = session.index >= total - 1 && !(!ok && !item.retry);
     const next = h("button", { class: "primary", onclick: () => commit(ok) }, last ? "Finish" : "Next →");
-    body.append(h("div", { class: "row" }, next,
+    const nextNoRepeat = !ok && !item.retry && h("button", { class: "ghost", onclick: () => commit(ok, true) }, "Got it — next, don't repeat it");
+    body.append(h("div", { class: "row" }, next, nextNoRepeat,
       !ok && !session.dontKnow && !session.shown.options && session.given && h("button", { onclick: () => { acceptMine(q); commit(true); } }, "I was right ✔")),
       ...(!ok && !session.dontKnow && !session.shown.options && session.given ? [h("p", { class: "small muted", style: "margin:.5rem 0 0" }, "Pressing “I was right” counts it and remembers your wording for next time.")] : []));
     setTimeout(() => next.focus(), 0);
@@ -1716,7 +1718,7 @@ async function askAiToCheck(q) {
   render();
 }
 
-function commit(correct) {
+function commit(correct, skipRetry = false) {
   const q = currentQuestion();
   if (!q) return;
   const item = session.queue[session.index];
@@ -1752,7 +1754,7 @@ function commit(correct) {
       toast("🎁 Daily goal reached! You earned a chest");
     }
     session.results.push(correct);
-    if (!correct) session.queue.splice(Math.min(session.queue.length, session.index + 4), 0, { id: q.id, retry: true }); // see it again shortly
+    if (!correct && !skipRetry) session.queue.splice(Math.min(session.queue.length, session.index + 4), 0, { id: q.id, retry: true }); // see it again shortly
   }
   checkBadges();
   session.index++;
