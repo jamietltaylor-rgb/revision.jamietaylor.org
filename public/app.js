@@ -1401,14 +1401,14 @@ function viewSetup() {
       h("select", { id: "kind", onchange: (e) => { reviseKind = e.target.value; } }, Object.entries(KIND_GROUPS).map(([v, [label]]) => h("option", { value: v, selected: v === reviseKind }, `${label}${v === "all" ? "" : ` (${pool.filter((q) => inKindGroup(q, v)).length})`}`)))),
     state.questions.some((x) => x.calc) && h("label", {}, "Which maths paper?",
       h("select", { id: "paperpick", "aria-label": "Which maths paper", onchange: (e) => { revisePaper = e.target.value; } },
-        [["all", "Both — mixed"], ["non", "Paper 1 — no calculator"], ["calc", "Paper 2 / 3 — calculator"]].map(([v, label]) => h("option", { value: v, selected: v === revisePaper }, label)))),
+        [["all", "All papers — mixed"], ["1", "Paper 1 — no calculator"], ["2", "Paper 2 — calculator"], ["3", "Paper 3 — calculator"], ["non", "Any non-calculator question"], ["calc", "Any calculator question"]].map(([v, label]) => h("option", { value: v, selected: v === revisePaper }, label)))),
     h("label", {}, "How many?", lengthSel),
     h("button", { class: "primary big", onclick: () => startSession(subjectSel.value, lengthSel.value, reviseMode, reviseMode === "exam" ? reviseKind : "all", revisePaper) }, "Start"));
 }
 
 function startSession(subjectId, length, mode = null, kindGroup = "all", paper = "all") {
   const t = today();
-  const pool = (mode ? ofMode(mode) : state.questions).filter((q) => inKindGroup(q, kindGroup) && (paper === "all" || q.calc === paper));
+  const pool = (mode ? ofMode(mode) : state.questions).filter((q) => inKindGroup(q, kindGroup) && (paper === "all" || q.calc === paper || q.paper === paper));
   const dueCount = pool.filter((q) => (subjectId === "all" || q.subjectId === subjectId) && q.due <= t).length;
   const count = length === "due" ? Math.max(dueCount, 1) : length === "all" ? Infinity : Number(length) || 10;
   const { picked } = L.pickQuestions(pool, { subjectId, count, today: t });
@@ -1484,7 +1484,7 @@ function viewQuestion() {
     bar(Math.round((session.index / total) * 100), "Round progress"));
 
   const body = h("div", {},
-    h("div", { class: "row", style: "margin-top:.8rem" }, h("span", { class: "tag" }, subject ? subject.name : "Question"), q.exam && h("span", { class: "tag" }, `📝 ${markWord(q.marks)}`), q.exam && kindTag(q, subject && subject.name) && h("span", { class: "tag" }, kindTag(q, subject && subject.name)), q.calc && h("span", { class: "tag" }, L.calcLabel(q.calc)), q.src && h("span", { class: "tag" }, `📄 ${q.src}`), item.retry && h("span", { class: "tag" }, "Second chance — no points")),
+    h("div", { class: "row", style: "margin-top:.8rem" }, h("span", { class: "tag" }, subject ? subject.name : "Question"), q.exam && h("span", { class: "tag" }, `📝 ${markWord(q.marks)}`), q.exam && kindTag(q, subject && subject.name) && h("span", { class: "tag" }, kindTag(q, subject && subject.name)), q.calc && h("span", { class: "tag" }, L.calcLabel(q.calc, q.paper)), q.src && h("span", { class: "tag" }, `📄 ${q.src}`), item.retry && h("span", { class: "tag" }, "Second chance — no points")),
     ctxView(q, subject && subject.name),
     h("p", { class: "quiz-q" }, q.q),
     q.opts && q.opts.length && q.answers && h("p", { class: "small muted", style: "margin:-.4rem 0 .6rem" }, "Select two answers."),
@@ -1875,7 +1875,7 @@ function ensureSubject(fallbackName = "") {
   }
   return draft.subjectId;
 }
-const makeQuestion = (subjectId, q, a, choices = [], src = "", exam = null, extra = {}) => ({ id: L.uid(), subjectId, q, a, choices, ...(src ? { src: String(src).slice(0, 80) } : {}), ...(exam ? { exam: true, marks: exam.marks, ...(exam.kind ? { kind: exam.kind } : {}), ...(exam.ctx ? { ctx: exam.ctx } : {}), ...(exam.opts ? { opts: exam.opts } : {}), ...(exam.answers ? { answers: exam.answers, pick: 2 } : {}), ...(exam.fig ? { fig: exam.fig } : {}) } : {}), ...(extra.how ? { how: extra.how } : {}), ...(extra.calc ? { calc: extra.calc } : {}), box: 1, due: today(), right: 0, wrong: 0 });
+const makeQuestion = (subjectId, q, a, choices = [], src = "", exam = null, extra = {}) => ({ id: L.uid(), subjectId, q, a, choices, ...(src ? { src: String(src).slice(0, 80) } : {}), ...(exam ? { exam: true, marks: exam.marks, ...(exam.kind ? { kind: exam.kind } : {}), ...(exam.ctx ? { ctx: exam.ctx } : {}), ...(exam.opts ? { opts: exam.opts } : {}), ...(exam.answers ? { answers: exam.answers, pick: 2 } : {}), ...(exam.fig ? { fig: exam.fig } : {}) } : {}), ...(extra.how ? { how: extra.how } : {}), ...(extra.calc ? { calc: extra.calc } : {}), ...(extra.paper ? { paper: extra.paper } : {}), box: 1, due: today(), right: 0, wrong: 0 });
 
 function addQuestion() {
   const q = draft.q.trim();
@@ -1936,7 +1936,7 @@ async function makeWithAi() {
       const part = remaining ? remaining.slice(0, chunk) : null;
       const ask = part ? part.length : Math.min(chunk, total - items.length);
       if (!ask) break;
-      const r = await cloud.generate({ topic, subject: chosenSubjectName(), level: draft.level, count: ask, style: draft.style, styles: draft.styles, paper: draft.paper, board: draft.board, mode: draft.mode, ...(part ? { kinds, plan: part } : {}), avoid: items.slice(-30).map((x) => x.q) });
+      const r = await cloud.generate({ mathsPaper: draft.mathsPaper || "all", topic, subject: chosenSubjectName(), level: draft.level, count: ask, style: draft.style, styles: draft.styles, paper: draft.paper, board: draft.board, mode: draft.mode, ...(part ? { kinds, plan: part } : {}), avoid: items.slice(-30).map((x) => x.q) });
       const got = (Array.isArray(r && r.questions) ? r.questions : []).filter((x) => x && x.q && x.a);
       let fresh = 0;
       for (const x of got) {
@@ -1975,7 +1975,7 @@ async function checkMaker() {
   }
 }
 async function copyPrompt() {
-  draft.prompt = L.buildAiPrompt({ topic: draft.topic, level: draft.level, count: wantedCount(), style: draft.style, styles: draft.styles, paper: draft.paper, board: draft.board, mode: draft.mode, subject: chosenSubjectName(), ...(draft.mode === "exam" ? { kinds: examKinds() } : {}) });
+  draft.prompt = L.buildAiPrompt({ mathsPaper: draft.mathsPaper || "all", topic: draft.topic, level: draft.level, count: wantedCount(), style: draft.style, styles: draft.styles, paper: draft.paper, board: draft.board, mode: draft.mode, subject: chosenSubjectName(), ...(draft.mode === "exam" ? { kinds: examKinds() } : {}) });
   let copied = false;
   try { await navigator.clipboard.writeText(draft.prompt); copied = true; } catch { copied = false; }
   toast(copied ? "Prompt copied — paste it into another AI ✓" : "Copy the prompt from the box below.");
@@ -1996,7 +1996,7 @@ function addPreview() {
     if (!made) return toast("You have too many subjects already — delete one first.");
     examSubjectId = made.id;
   }
-  for (const it of keep) state.questions.push(it.exam ? makeQuestion(examSubjectId, it.q, it.a, [], it.src || "", { marks: it.marks, opts: it.opts, answers: it.answers, kind: it.kind, ctx: it.ctx, fig: it.fig }, { how: it.how, calc: it.calc }) : makeQuestion(subjectId, it.q, it.a, it.choices || [], it.src || "", null, { how: it.how, calc: it.calc }));
+  for (const it of keep) state.questions.push(it.exam ? makeQuestion(examSubjectId, it.q, it.a, [], it.src || "", { marks: it.marks, opts: it.opts, answers: it.answers, kind: it.kind, ctx: it.ctx, fig: it.fig }, { how: it.how, calc: it.calc, paper: it.paper }) : makeQuestion(subjectId, it.q, it.a, it.choices || [], it.src || "", null, { how: it.how, calc: it.calc, paper: it.paper }));
   state.stats.created += keep.length;
   draft.preview = null; draft.paste = ""; draft.prompt = "";
   checkBadges();
@@ -2142,13 +2142,13 @@ function viewQuestions() {
         state.subjects.map((s) => h("option", { value: s.id, selected: s.id === draft.subjectId }, s.name)),
         h("option", { value: "__new", selected: draft.subjectId === "__new" }, "＋ New subject…"))),
     (draft.subjectId === "__new" || !state.subjects.length) && h("label", {}, "New subject name",
-      h("input", { type: "text", maxlength: 60, placeholder: "e.g. Biology (leave blank to use the topic below)", value: draft.newSubject, oninput: (e) => { draft.newSubject = e.target.value; }, onchange: () => { if (draft.mode === "exam") render(); } })));
+      h("input", { type: "text", maxlength: 60, placeholder: "e.g. Biology (leave blank to use the topic below)", value: draft.newSubject, oninput: (e) => { draft.newSubject = e.target.value; }, onchange: () => { if (draft.mode === "exam" || L.isMathsSubject(chosenSubjectName(), draft.topic) !== Boolean(draft.wasMaths)) render(); } })));
 
   const opt = (value, label, current) => h("option", { value, selected: value === current }, label);
   const makeCard = h("section", { class: "card" },
     h("h2", {}, "Make questions on a topic"),
     h("p", { class: "muted small" }, "Type what you're revising and the app can write the questions for you — or copy a ready-made prompt for any other AI."),
-    h("label", {}, "Topic", h("input", { type: "text", maxlength: 120, placeholder: "e.g. Photosynthesis, or The causes of World War 1", value: draft.topic, oninput: (e) => { draft.topic = e.target.value; }, onchange: () => { if (draft.mode === "exam") render(); },
+    h("label", {}, "Topic", h("input", { type: "text", maxlength: 120, placeholder: "e.g. Photosynthesis, or The causes of World War 1", value: draft.topic, oninput: (e) => { draft.topic = e.target.value; }, onchange: () => { if (draft.mode === "exam" || L.isMathsSubject(chosenSubjectName(), draft.topic) !== Boolean(draft.wasMaths)) render(); },
       onkeydown: (e) => { if (e.key === "Enter" && cloud.enabled) makeWithAi(); } })),
     h("div", { class: "grid2" },
       h("label", {}, "Level", h("select", { onchange: (e) => { draft.level = e.target.value; } }, L.LEVELS.map((x) => opt(x, x, draft.level)))),
@@ -2162,7 +2162,12 @@ function viewQuestions() {
           draft.style = draft.styles[0];
           render();
         } }, l)))),
-      h("label", {}, "Exam board", h("select", { "aria-label": "Exam board", onchange: (e) => { draft.board = e.target.value; setBoardFor(draft.subjectId, e.target.value); save(); render(); } }, L.BOARDS.map((x) => opt(x, x, draft.board))))),
+      h("label", {}, "Exam board", h("select", { "aria-label": "Exam board", onchange: (e) => { draft.board = e.target.value; setBoardFor(draft.subjectId, e.target.value); save(); render(); } }, L.BOARDS.map((x) => opt(x, x, draft.board)))),
+      (draft.wasMaths = L.isMathsSubject(chosenSubjectName(), draft.topic)) && h("div", { class: "card", style: "margin:.6rem 0;padding:.7rem .9rem;border:2px solid var(--accent)" },
+        h("label", {}, "📐 Which maths paper? (Edexcel)",
+          h("select", { "aria-label": "Which maths paper", onchange: (e) => { draft.mathsPaper = e.target.value; render(); } },
+            [["all", "All three papers — mixed"], ["1", "Paper 1 — NON-calculator"], ["2", "Paper 2 — calculator"], ["3", "Paper 3 — calculator"]].map(([v, label]) => h("option", { value: v, selected: (draft.mathsPaper || "all") === v }, label)))),
+        h("p", { class: "small muted", style: "margin:.4rem 0 0" }, (draft.mathsPaper || "all") === "1" ? "Paper 1: no calculator allowed, so the numbers are friendly and answers are exact." : (draft.mathsPaper || "all") === "all" ? "Each question is tagged Paper 1 (no calculator) or Paper 2/3 (calculator), like the real exams." : `Paper ${draft.mathsPaper}: calculator allowed, so expect decimals, rounding and trigonometry.`))),
     h("label", {}, "Type of questions", h("select", { "aria-label": "Type of questions", onchange: (e) => { draft.mode = e.target.value; if (draft.mode === "exam" && Number(draft.count) > 20) draft.count = "5"; render(); } },
       [["quick", "Quick questions (short answers)"], ["exam", "Complete exam questions (marks + mark scheme)"]].map(([v, l]) => opt(v, l, draft.mode)))),
     draft.mode === "exam" && h("p", { class: "small muted", style: "margin:0 0 .6rem" }, "Questions set the way real papers set them, with a mark scheme. You write your answer and the app marks it for you (6 and 9 markers are marked in levels, like the real thing). They're saved as their own topic, like “Biology – Exam questions”, so they stay separate from your quick questions."),
@@ -2234,7 +2239,7 @@ function viewQuestions() {
           it.ctx && h("span", { class: "a" }, `Case study: ${it.ctx}`),
           h("span", { class: "a" }, `${it.opts ? (it.answers ? "Correct answers" : "Correct answer") : it.exam ? `Mark scheme (${markWord(it.marks)})` : "Answer"}: ${it.opts ? correctLabels(it) : it.a}${it.choices && it.choices.length ? `  ·  wrong options: ${it.choices.join(", ")}` : ""}`),
           it.exam && h("span", { class: "tag" }, `${it.opts ? "🔠 " : "📝 "}${kindTag(it, chosenSubjectName()) ? kindTag(it, chosenSubjectName()) + " · " : ""}${markWord(it.marks)}`), it.fig && h("span", { class: "tag" }, `📊 ${it.fig.type === "table" ? "table" : it.fig.type + " chart"}`),
-          it.calc && h("span", { class: "tag" }, L.calcLabel(it.calc)), it.how && h("span", { class: "tag" }, "📐 with worked solution"),
+          it.calc && h("span", { class: "tag" }, L.calcLabel(it.calc, it.paper)), it.how && h("span", { class: "tag" }, "📐 with worked solution"),
           it.duplicate && h("span", { class: "tag" }, "already in this subject")))),
       h("div", { class: "row", style: "margin-top:.8rem" },
         h("button", { class: "primary", onclick: addPreview }, `Add ${plural(picked, "question")}`),
@@ -2615,4 +2620,49 @@ async function init() {
   if (restored) await enterApp();
   else { booting = false; render(); }
 }
+// ---------- "is the update in place?" ----------
+const WHATS_NEW = "Maths paper picker (Paper 1, 2, 3 — calculator or not), worked solutions, Ask tab, quotes quiz.";
+function runningVersion() {
+  const m = document.querySelector('meta[name="app-version"]');
+  return m ? { v: m.getAttribute("content") || "", date: m.getAttribute("data-date") || "" } : null;
+}
+const prettyDate = (d) => { try { return new Date(`${d}T12:00:00`).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }); } catch { return d; } };
+const verUI = { newer: false, checking: false, note: "" };
+function paintVersion() {
+  const box = document.getElementById("ver");
+  const cur = runningVersion();
+  if (!box || !cur) return;
+  box.replaceChildren(
+    h("span", { class: "small muted" }, `Version ${prettyDate(cur.date)} · ${cur.v}`),
+    verUI.newer ? h("button", { class: "small primary", style: "margin-left:.6rem", onclick: () => location.reload() }, "🔄 Newer version ready — tap to update")
+      : h("button", { class: "ghost small", style: "margin-left:.6rem", disabled: verUI.checking, onclick: () => checkForUpdate(true) }, verUI.checking ? "Checking…" : "Check for update"),
+    verUI.note && h("span", { class: "small", style: "margin-left:.6rem" }, verUI.note));
+}
+async function checkForUpdate(manual = false) {
+  const cur = runningVersion();
+  if (!cur) return;
+  verUI.checking = true; verUI.note = ""; paintVersion();
+  try {
+    const res = await fetch(`${location.pathname}?check=${Date.now()}`, { cache: "no-store" });
+    const html = await res.text();
+    const m = html.match(/<meta name="app-version" content="([0-9a-f]+)"/);
+    if (m && m[1] !== cur.v) { verUI.newer = true; if (!manual) toast("🔄 A newer version of Revise is ready — tap “update” at the bottom."); }
+    else if (manual) verUI.note = "✅ You're on the newest version";
+  } catch { if (manual) verUI.note = "Couldn't check — are you online?"; }
+  verUI.checking = false; paintVersion();
+}
+function announceVersion() {
+  const cur = runningVersion();
+  paintVersion();
+  if (!cur) return;
+  let seen = null;
+  try { seen = localStorage.getItem("revise-seen-version"); localStorage.setItem("revise-seen-version", cur.v); } catch { seen = null; }
+  if (seen && seen !== cur.v) {
+    const box = document.getElementById("toasts");
+    if (box) { const el = h("div", { class: "toast", style: "max-width:92vw" }, `✨ Revise just updated! New: ${WHATS_NEW}`); box.append(el); setTimeout(() => el.remove(), 9000); }
+  }
+  setTimeout(() => checkForUpdate(false), 2500);
+}
+
 init();
+announceVersion();

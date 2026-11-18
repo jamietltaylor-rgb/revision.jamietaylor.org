@@ -266,3 +266,5 @@ button.danger-solid:hover:not(:disabled) { border-color: var(--bad); filter: bri
 @media (prefers-reduced-motion: reduce) { .tour-hole { animation: none; } }
 .tour-body { overflow-y: auto; flex: 1 1 auto; min-height: 0; }
 .tour-foot { margin-top: .7rem; justify-content: space-between; flex: 0 0 auto; }
+
+.ver { padding: 1.2rem 0 5.5rem; text-align: center; }

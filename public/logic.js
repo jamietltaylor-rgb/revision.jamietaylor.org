@@ -789,38 +789,65 @@ export function parseCalc(v) {
   if (/calc|^[23]$|paper\s*[23]\b/.test(t)) return "calc";
   return "";
 }
-export const calcLabel = (c) => (c === "non" ? "🚫🧮 Paper 1 · No calculator" : c === "calc" ? "🧮 Paper 2/3 · Calculator" : "");
+/** "1", "2" or "3" when a value names a paper number, otherwise "". */
+export function parsePaperNo(v) {
+  const t = String(v ?? "").toLowerCase().trim();
+  const m = t.match(/^([123])$/) || t.match(/paper\s*([123])\b/);
+  return m ? m[1] : "";
+}
+export const calcLabel = (c, paper = "") => (c === "non" ? `🚫🧮 ${paper ? `Paper ${paper}` : "Paper 1"} · No calculator` : c === "calc" ? `🧮 ${paper ? `Paper ${paper}` : "Paper 2/3"} · Calculator` : "");
+/** Removes paper codes ("1MA1/1H"), question numbers and similar labels some AIs put at the start of a question. */
+export const stripQuestionLabel = (q) => {
+  let t = String(q || "");
+  for (let i = 0; i < 3; i++) {
+    const next = t.replace(/^\s*(?:\d?MA\d\s*\/\s*\d[FHfh]?|paper\s*[123]|q(?:uestion)?\s*\d+)\s*[:.)\-–—,]?\s*(?=\S)/i, "").replace(/^\s*\d+\s*[.)]\s+(?=\S)/, "");
+    if (next === t) break;
+    t = next;
+  }
+  return t.trim();
+};
 const useEdexcelMaths = (board) => !board || board === "Any exam board" || board === "Edexcel";
 export function mathsNotes(board) {
   return `${useEdexcelMaths(board) ? "Base them on the Edexcel GCSE Mathematics (1MA1) papers. " : ""}GCSE Maths has three papers, each 1 hour 30 minutes and 80 marks, and every paper covers Number, Algebra, Ratio/proportion/rates of change, Geometry and measures, Probability and Statistics. Paper 1 is a NON-CALCULATOR paper; Papers 2 and 3 are CALCULATOR papers.`;
 }
+/** What to say about which paper(s) the questions come from. mathsPaper is "1", "2", "3" or "all". */
+export function mathsPaperRule(mathsPaper = "all") {
+  const NON = "it must be answerable WITHOUT a calculator (friendly numbers, fractions, surds, answers left exact such as 12π or 3√2, only exact trig values, no awkward decimals)";
+  const CALC = "it needs a calculator (decimals, percentages of awkward amounts, compound interest, trigonometry, rounding to 3 significant figures or 1 decimal place, standard form on a calculator)";
+  if (mathsPaper === "1") return `- Every question is a Paper 1 question (NON-CALCULATOR): ${NON}. Write "paper: 1" for every question.`;
+  if (mathsPaper === "2" || mathsPaper === "3") return `- Every question is a Paper ${mathsPaper} question (CALCULATOR allowed): ${CALC}. Write "paper: ${mathsPaper}" for every question.`;
+  return MATHS_PAPER_RULE;
+}
+const MATHS_STYLE_RULE = `- Write them like real Edexcel past-paper questions: realistic contexts and the command words Work out, Calculate, Simplify, Solve, Expand, Factorise, Show that, "Give your answer correct to 3 significant figures". Do NOT put paper codes (such as 1MA1/1H), question numbers or the number of marks at the start or end of a question.`;
 const MATHS_PAPER_RULE = `- Tag every question with its paper. Paper 1 = it must be answerable WITHOUT a calculator (friendly numbers, fractions, surds, answers left exact such as 12π or 3√2, only exact trig values, no awkward decimals). Paper 2 = it needs a calculator (decimals, percentages of awkward amounts, compound interest, trigonometry on a calculator, rounding to 3 significant figures or 1 decimal place, standard form on a calculator). Make roughly half of each.`;
 const MATHS_WRITING_RULES = `- Write maths in plain text: fractions like 3/4, powers like x^2, roots like sqrt(49), × and ÷ for multiply and divide, no LaTeX, no $ signs, no Markdown. Put any units in the question; give units in the answer only if the question asks for them.
 - Every answer must be exactly right: work each question out twice. If the answer must be rounded, say how in the question. If an answer can be written another way (0.5, 1/2, 50%), give the other forms as alternatives.
 - Give a worked solution for every question: short numbered steps naming the rule or formula used and showing the numbers, finishing with the answer.`;
 export const mathsRules = (needsHow = true) => `${MATHS_PAPER_RULE}\n${needsHow ? MATHS_WRITING_RULES : MATHS_WRITING_RULES.split("\n").slice(0, 2).join("\n")}`;
+export { MATHS_STYLE_RULE as mathsStyleRule };
 
 function splitTags(cells) {
-  let how = "", calc = "";
+  let how = "", calc = "", paperNo = "";
   const rest = [];
   for (const c of cells) {
     let m;
     if ((m = c.match(/^(?:how|working|method|solution|steps)\s*[:\-–]\s*([\s\S]+)$/i))) how = m[1];
-    else if ((m = c.match(/^paper\s*[:\-–]?\s*([\s\S]+)$/i)) && parseCalc(m[1])) calc = parseCalc(m[1]);
+    else if ((m = c.match(/^paper\s*[:\-–]?\s*([\s\S]+)$/i)) && parseCalc(m[1])) { calc = parseCalc(m[1]); paperNo = parsePaperNo(m[1]); }
     else rest.push(c);
   }
-  return { how, calc, rest };
+  return { how, calc, paperNo, rest };
 }
 
 function toItem(parts, alts = [], src = "", marks = 0, extra = {}) {
   const cells = parts.map(clean);
-  const q = cells[0];
+  const q = stripQuestionLabel(cells[0]);
   const a = cells[1];
-  if (!q || !a) return null;
+  if (!q || !a || /^[\s\/\\|.,;:\-–—_*#]+$/.test(a)) return null; // no question, or an "answer" that is only a stray symbol like "/"
   const tags = splitTags(cells.slice(2));
   const how = clean(extra.how || tags.how).slice(0, 900);
-  const calc = parseCalc(extra.calc) || tags.calc;
-  const tagged = { ...(how ? { how } : {}), ...(calc ? { calc } : {}) };
+  const paperNo = parsePaperNo(extra.calc) || tags.paperNo;
+  const calc = parseCalc(extra.calc) || tags.calc || (paperNo === "1" ? "non" : paperNo ? "calc" : "");
+  const tagged = { ...(how ? { how } : {}), ...(calc ? { calc } : {}), ...(paperNo ? { paper: paperNo } : {}) };
   const m = Math.round(Number(marks));
   const exam = Number.isFinite(m) && m >= 1;
   const choices = exam ? [] : [...new Set(tags.rest.filter(Boolean))].filter((c) => normalise(c) !== normalise(a)).slice(0, 5);
@@ -1057,7 +1084,7 @@ export function boardForSubject(settings, subjectId) {
 
 export const BOARDS = ["Any exam board", "AQA", "Edexcel", "OCR", "WJEC / Eduqas", "CCEA", "SQA"];
 
-export function buildAiPrompt({ topic, level = "GCSE", count = 15, style = "gapfill", styles, paper = false, board = "", mode = "quick", kinds, subject = "" } = {}) {
+export function buildAiPrompt({ topic, level = "GCSE", count = 15, style = "gapfill", styles, paper = false, board = "", mode = "quick", kinds, subject = "", mathsPaper = "all" } = {}) {
   const t = clean(topic).slice(0, 120) || "[type your topic here]";
   const n = Math.max(1, Math.min(50, Math.round(Number(count)) || 15));
   const lvl = clean(level) || "GCSE";
@@ -1079,19 +1106,20 @@ ${used.map((k, i) => `${i + 1}. ${guides[i].shape}`).join("\n")}
 Rules:
 ${used.map((k, i) => `- ${k}: ${guides[i].rules}`).join("\n")}
 - Do not put the number of marks in the question text — the app shows it. Real command words only. Marking points must be factually correct and short.
-- No markdown, no numbering, no text outside the JSON.${maths ? `\n- ${mathsNotes(board)}\n- Add "paper": "1" or "2" and "how": "the worked solution as short numbered steps separated by ' ; '" to every object.\n${mathsRules(false)}` : ""}${business ? "\n- This is modelled on the Edexcel GCSE Business papers: questions about a made-up business, with 'Outline one…', 'Explain one…', 'Analyse the impact on…' and 'Justify…' command words." : ""}${paperLines(paper, board, lvl)}`;
+- No markdown, no numbering, no text outside the JSON.${maths ? `\n- ${mathsNotes(board)}\n- Add "paper" (${mathsPaper === "all" ? '"1", "2" or "3"' : `"${mathsPaper}"`}) and "how": "the worked solution as short numbered steps separated by ' ; '" to every object.\n${mathsPaperRule(mathsPaper)}\n${MATHS_STYLE_RULE}\n${MATHS_WRITING_RULES.split("\n").slice(0, 2).join("\n")}` : ""}${business ? "\n- This is modelled on the Edexcel GCSE Business papers: questions about a made-up business, with 'Outline one…', 'Explain one…', 'Analyse the impact on…' and 'Justify…' command words." : ""}${paperLines(paper, board, lvl)}`;
   }
   if (maths) {
     const wantsChoice = style === "choice" || (Array.isArray(styles) && styles.includes("choice"));
     return `Write ${n} maths revision questions about "${t}" at ${lvl} level. ${mathsNotes(board)}${useEdexcelMaths(board) ? "" : tailor}
 
 Reply with ONLY the questions, one per line, in exactly this format:
-question | answer | paper: 1 | how: step 1 ; step 2 ; step 3${wantsChoice ? " | wrong option 1 | wrong option 2 | wrong option 3" : ""}
+question | answer | paper: ${mathsPaper === "2" || mathsPaper === "3" ? mathsPaper : "1"} | how: step 1 ; step 2 ; step 3${wantsChoice ? " | wrong option 1 | wrong option 2 | wrong option 3" : ""}
 
 Rules:
 - Each question is a calculation or problem with ONE clear final answer that can be typed (a number, an expression or a short phrase), the kind that appears on the real papers.
 - ${wantsChoice ? "Give 3 wrong options for every question, each one a realistic mistake students make (so each is multiple choice)." : "Do not include wrong options — every question is answered by typing."}
-${MATHS_PAPER_RULE.replace("- Tag every question with its paper.", '- Write "paper: 1" or "paper: 2" in the third column of every line.')}
+${mathsPaperRule(mathsPaper)}${mathsPaper === "all" ? '\n- Write "paper: 1", "paper: 2" or "paper: 3" in the third column of every line (Paper 1 = no calculator; Papers 2 and 3 = calculator).' : ""}
+${MATHS_STYLE_RULE}
 ${MATHS_WRITING_RULES}
 - In the how: column write the steps separated by " ; " (a space, semicolon, space) and never use the "|" character inside any column.
 - One line per question. No numbering, headings, bullet points, bold text or intro/outro text.
@@ -1419,6 +1447,7 @@ export function sanitiseState(raw, catalogueIds = null) {
       ...(str(q.src, 80) ? { src: str(q.src, 80) } : {}),
       ...(str(q.how, 900) ? { how: str(q.how, 900) } : {}),
       ...(q.calc === "non" || q.calc === "calc" ? { calc: q.calc } : {}),
+      ...(["1", "2", "3"].includes(q.paper) ? { paper: q.paper } : {}),
       ...(isExam ? { exam: true, marks: opts ? (answers ? 2 : 1) : Math.min(12, Math.round(q.marks)) } : {}),
       ...(kind ? { kind } : {}),
       ...(ctx ? { ctx } : {}),

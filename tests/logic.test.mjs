@@ -850,9 +850,24 @@ test("maths prompt is Edexcel based, explains Paper 1 vs 2 and asks for worked s
   assert.match(L.buildAiPrompt({ topic: "Algebra", subject: "Maths", styles: ["choice"] }), /wrong option 1/);
   assert.ok(!/Edexcel GCSE Mathematics/.test(L.buildAiPrompt({ topic: "Algebra", subject: "Maths", board: "AQA" })));
   assert.ok(!/NON-CALCULATOR/.test(L.buildAiPrompt({ topic: "Cells", subject: "Biology" })));
-  assert.match(L.buildAiPrompt({ topic: "Algebra", subject: "Maths", mode: "exam", count: 4 }), /"paper": "1" or "2"/);
+  assert.match(L.buildAiPrompt({ topic: "Algebra", subject: "Maths", mode: "exam", count: 4 }), /"paper" \("1", "2" or "3"\)/);
 });
 test("questions keep their working and paper", () => {
   const s = L.sanitiseState({ subjects: [{ id: "s", name: "Maths" }], questions: [{ id: "q", subjectId: "s", q: "1+1", a: "2", how: "Add", calc: "non" }] });
   assert.equal(s.questions[0].how, "Add"); assert.equal(s.questions[0].calc, "non");
+});
+
+test("maths: paper numbers, stray paper codes and junk answers", () => {
+  const r = L.parseQuestionList("1MA1/1H Q3: Work out 3/4 of 20 | 15 | paper: 1 | how: 20 ÷ 4 = 5 ; 5 × 3 = 15\nWork out 2 + 2 | / \nFind 17.5% of 240 | 42 | paper: 3");
+  assert.equal(r.items.length, 2);
+  assert.equal(r.items[0].q, "Work out 3/4 of 20");
+  assert.equal(r.items[0].paper, "1");
+  assert.equal(r.items[0].calc, "non");
+  assert.equal(r.items[1].paper, "3");
+  assert.equal(r.items[1].calc, "calc");
+  assert.equal(L.calcLabel("calc", "3"), "🧮 Paper 3 · Calculator");
+  assert.equal(L.stripQuestionLabel("Question 4. Solve x + 2 = 5"), "Solve x + 2 = 5");
+  assert.match(L.buildAiPrompt({ topic: "Algebra", subject: "Maths", mathsPaper: "1" }), /Paper 1 question \(NON-CALCULATOR\)/);
+  assert.match(L.buildAiPrompt({ topic: "Algebra", subject: "Maths", mathsPaper: "3" }), /paper: 3/);
+  assert.match(L.buildAiPrompt({ topic: "Algebra", subject: "Maths" }), /Do NOT put paper codes/);
 });

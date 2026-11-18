@@ -85,3 +85,6 @@ A guided tour (public/tutorial.js) opens for brand-new accounts and is always av
 
 ## Maths
 Maths prompts follow the Edexcel GCSE (1MA1) papers: Paper 1 is no calculator, Papers 2 and 3 allow one. Questions can carry `paper: 1|2` and `how: step ; step` columns (or JSON `paper`/`how`); the app shows a Paper badge, lets you practise one paper, and shows the saved working. With no saved working, a signed-in student gets an AI step-by-step method (right, wrong or "I don't know").
+
+## Knowing the update is in place
+The page footer shows the version (date + code) and a "Check for update" button. When the app opens on a new version it shows an "✨ Revise just updated!" message, and it quietly checks for a newer version and offers a "tap to update" button. `node tools/stamp.mjs` writes the version into index.html.

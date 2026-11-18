@@ -13,7 +13,10 @@ export const versionOf = () => {
   for (const f of FILES) h.update(f).update(readFileSync(path.join(pub, f)));
   return h.digest("hex").slice(0, 8);
 };
-export const stamped = (html, v) => html
+const dateOf = (html, v, now) => { const m = html.match(/<meta name="app-version" content="([0-9a-f]+)" data-date="([0-9-]+)">/); return m && m[1] === v ? m[2] : now; };
+export const stamped = (html, v, now = new Date().toISOString().slice(0, 10)) => html
+  .replace(/[ ]*<meta name="app-version"[^>]*>\n?/, "")
+  .replace(/(<link rel="stylesheet" href="style\.css)/, `<meta name="app-version" content="${v}" data-date="${dateOf(html, v, now)}">\n  $1`)
   .replace(/[ ]*<script type="importmap">[\s\S]*?<\/script>\n?/, "")
   .replace(/(<link rel="stylesheet" href="style\.css)(\?v=[0-9a-f]+)?"/, `$1?v=${v}"`)
   .replace(/<script type="module" src="app\.js(\?v=[0-9a-f]+)?"><\/script>/, `<script type="importmap">{"imports":{${MODULES.map((m) => `"./${m}":"./${m}?v=${v}"`).join(",")}}}</script>\n  <script type="module" src="app.js?v=${v}"></script>`);
