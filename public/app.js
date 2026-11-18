@@ -1928,6 +1928,13 @@ function setPreview(source, items, skipped = 0) {
   const marked = L.markDuplicates(items, state.questions, real);
   draft.preview = { source, skipped, items: marked.map((it) => ({ ...it, warn: L.checkMaths(it), keep: !it.duplicate })) };
 }
+function fixItem(it) {
+  const f = L.fixMaths(it);
+  if (!f) return false;
+  it.a = f.a.slice(0, 900); if (it.how) it.how = f.how.slice(0, 900);
+  it.warn = L.checkMaths(it); it.fixed = f.changes;
+  return true;
+}
 function checkPaste() {
   const r = L.parseQuestionList(draft.paste);
   if (!r.items.length) return toast("I couldn't find any questions in that. Try one per line like:  question | answer");
@@ -2268,7 +2275,8 @@ function viewQuestions() {
     previewCard = h("section", { class: "card prize" },
       h("h2", {}, `Check these before adding (${p.items.length})`),
       p.source === "ai" && h("p", { class: "small muted" }, "Made by AI — untick anything that looks wrong."),
-      p.items.some((it) => it.warn && it.warn.length) && h("div", { class: "verdict bad", role: "alert", style: "margin:.4rem 0" }, `⚠️ I re-did the sums and ${plural(p.items.filter((it) => it.warn && it.warn.length).length, "question")} may have a mistake in the answer or working. Look for the ⚠️ under each one, then untick it or fix it. I can only check calculations written like “sum = number”, so still spot-check the rest.`),
+      p.items.some((it) => it.warn && it.warn.length) && h("div", { class: "verdict bad", role: "alert", style: "margin:.4rem 0" }, `⚠️ I re-did the sums and ${plural(p.items.filter((it) => it.warn && it.warn.length).length, "question")} may have a mistake in the answer or working. Look for the ⚠️ under each one, then press “Fix it” or untick it. I can only check calculations written like “sum = number”, so still spot-check the rest.`,
+        h("div", { class: "row", style: "margin-top:.5rem" }, h("button", { class: "small primary", onclick: () => { const n = p.items.filter((it) => it.warn && it.warn.length && fixItem(it)).length; toast(n ? `Corrected ${plural(n, "question")} ✓` : "Nothing I could fix automatically."); render(); } }, "🛠 Fix all"))),
       p.skipped > 0 && h("p", { class: "small muted" }, `${plural(p.skipped, "line")} couldn't be read and ${p.skipped === 1 ? "was" : "were"} skipped.`),
       p.items.map((it) => h("label", { class: "pick" },
         h("input", { type: "checkbox", checked: it.keep, onchange: (e) => { it.keep = e.target.checked; render(); } }),
@@ -2280,6 +2288,8 @@ function viewQuestions() {
           it.exam && h("span", { class: "tag" }, `${it.opts ? "🔠 " : "📝 "}${kindTag(it, chosenSubjectName()) ? kindTag(it, chosenSubjectName()) + " · " : ""}${markWord(it.marks)}`), it.fig && h("span", { class: "tag" }, `📊 ${it.fig.type === "table" ? "table" : it.fig.type === "shape" ? "diagram" : it.fig.type + " chart"}`),
           it.calc && h("span", { class: "tag" }, L.calcLabel(it.calc, it.paper)), it.how && h("span", { class: "tag" }, "📐 with worked solution"),
           it.warn && it.warn.map((w) => h("span", { class: "a", style: "color:var(--bad,#dc2626);font-weight:600" }, `⚠️ Possible mistake: ${w.sum} = ${w.got}, but the list says ${w.said}.`)),
+          it.warn && it.warn.length > 0 && h("span", { class: "a" }, h("button", { type: "button", class: "small primary", onclick: (e) => { e.preventDefault(); if (fixItem(it)) toast("Corrected ✓ — check the new answer below."); else toast("I couldn't fix this one automatically — untick it or fix it by hand."); render(); } }, "🛠 Fix it")),
+          it.fixed && !(it.warn && it.warn.length) && h("span", { class: "a", style: "font-weight:600" }, `✅ Corrected: ${it.fixed.join("; ")}. Rounded answers were updated to match.`),
           it.duplicate && h("span", { class: "tag" }, "already in this subject")))),
       h("div", { class: "row", style: "margin-top:.8rem" },
         h("button", { class: "primary", onclick: addPreview }, `Add ${plural(picked, "question")}`),

@@ -1189,7 +1189,7 @@ export function buildAiPrompt({ topic, level = "GCSE", count = 15, style = "gapf
   if (mode === "exam") {
     const business = isBusinessSubject(subject, topic);
     const want = (Array.isArray(kinds) && kinds.length ? kinds : defaultExamKinds(subject, topic)).map(kindId).filter(Boolean);
-    const plan = examPlan(Math.min(n, 20), want.length ? want : EXAM_KIND_IDS);
+    const plan = examPlan(Math.min(n, maths ? 30 : 20), want.length ? want : EXAM_KIND_IDS);
     const used = PAPER_ORDER.filter((k) => plan.includes(k));
     const counts = used.map((k) => `${plan.filter((x) => x === k).length} × ${EXAM_KINDS[k].marks}-mark ${EXAM_KINDS[k].label.toLowerCase()}`).join(", ");
     const prof = examProfile(subject, topic);
@@ -1959,4 +1959,53 @@ export function checkMaths(item) {
     }
   }
   return out;
+}
+
+// ---------- fixing a mistake that checkMaths found ----------
+const numPattern = (str) => {
+  const [int, dec] = String(str).replace(/^-/, "").split(".");
+  let pat = "";
+  [...int].forEach((d, i) => { pat += d; const left = int.length - 1 - i; if (left > 0 && left % 3 === 0) pat += "[ ,]?"; });
+  return new RegExp("(?<![\\d.])" + pat + (dec !== undefined ? "\\." + dec : "") + "(?![\\d]|\\.\\d)", "g");
+};
+const roundTo = (x, dp) => Math.round(x * 10 ** dp) / 10 ** dp;
+const roundSf = (x, sf) => (x === 0 ? 0 : Number(x.toPrecision(sf)));
+const groupNum = (n, dp, grouped) => {
+  const f = Math.abs(n).toFixed(dp), [i, d] = f.split(".");
+  return (n < 0 ? "-" : "") + (grouped ? i.replace(/\B(?=(\d{3})+$)/g, " ") : i) + (d !== undefined ? "." + d : "");
+};
+/** Corrects the numbers the checker found wrong in an item's working and mark scheme, and the rounded answers that came from them. Returns { a, how, changes } or null. */
+export function fixMaths(item) {
+  const warns = checkMaths(item);
+  if (!warns.length) return null;
+  let a = String((item && item.a) || ""), how = String((item && item.how) || "");
+  const changes = [];
+  const wantsSf = /significant|sig\.? ?fig|\bs\.?f\b/i.test(String((item && item.q) || ""));
+  for (const w of warns) {
+    const oldV = Number(w.said);
+    if (!Number.isFinite(oldV)) continue;
+    const dpSaid = (String(w.said).split(".")[1] || "").length;
+    const dp = Math.max(dpSaid, 2) > 6 ? dpSaid : Math.max(dpSaid, dpSaid === 0 ? 0 : 2);
+    const newText = (grouped, cut) => groupNum(cut ? Math.trunc(w.got * 10 ** dp) / 10 ** dp : w.got, dp, grouped);
+    const swap = (text) => text.replace(numPattern(w.said), (m, off, whole) => newText(/[ ,]/.test(m), /^\s*(\.\.\.|…)/.test(whole.slice(off + m.length))));
+    const a1 = swap(a), h1 = swap(how);
+    if (a1 === a && h1 === how) continue;
+    a = a1; how = h1;
+    const knock = (text) => text.replace(/(?<![\d.])\d(?:[\d ,]*\d)?(?:\.\d+)?(?![\d]|\.\d)/g, (m) => {
+      const digits = m.replace(/[ ,]/g, "");
+      const sigDigits = digits.replace(".", "").replace(/^0+/, "");
+      if (!/^\d+(\.\d+)?$/.test(digits) || (sigDigits.length < 3 && !digits.includes("."))) return m;
+      const n = Number(digits), mdp = (digits.split(".")[1] || "").length;
+      const grouped = /[ ,]/.test(m);
+      const bySf = roundSf(oldV, sigDigits.length), byDp = roundTo(oldV, mdp);
+      const sfOk = Math.abs(bySf - n) < 1e-9, dpOk = Math.abs(byDp - n) < 1e-9;
+      if (!sfOk && !dpOk) return m;
+      const useSf = sfOk && (wantsSf || !dpOk);
+      const fixed = useSf ? roundSf(w.got, sigDigits.length) : roundTo(w.got, mdp);
+      return fixed === n ? m : groupNum(fixed, mdp, grouped);
+    });
+    a = knock(a); how = knock(how);
+    changes.push(`${w.sum} = ${newText(false)}`);
+  }
+  return changes.length ? { a, how, changes } : null;
 }

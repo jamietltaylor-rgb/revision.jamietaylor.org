@@ -47,3 +47,18 @@ test("checkMaths flags wrong sums in the working and leaves right ones", () => {
   assert.equal(L.checkMaths({ how: "Calculate 237 ÷ 2.75 = 86.1818... ; then 8.6 × π = 27.017... ; 21.5 × cos(37) = 17.171 ; 1/3 × π × 4.8^2 × 11.5 = 277.465", a: "2 + 45/60 = 2.75 ; £9 331.20" }).length, 0);
   assert.equal(L.checkMaths({ a: "M1 for 210/1260 = 1/6 = 0.167" }).length, 0);
 });
+
+test("fixMaths corrects the sum and the rounded answers that came from it", () => {
+  const it = { q: "Calculate its value after 7 years. Give your answer to the nearest pound.", a: "M1 for 248000 × 1.046^7 ; A1 for £340 774", how: "1. Calculate 248000 × 1.046^7 = 340773.8... ; 2. Round to the nearest pound = £340 774" };
+  const f = L.fixMaths(it);
+  assert.match(f.a, /£339 761/); assert.match(f.how, /£339 761/); assert.match(f.how, /= 339760\.9/);
+  assert.equal(L.checkMaths({ ...it, a: f.a, how: f.how }).length, 0);
+  assert.equal(L.fixMaths({ a: "2 + 2 = 4" }), null);
+  const cone = L.fixMaths({ q: "Give your answer correct to 3 significant figures.", a: "1/3 × π × 4.8^2 × 11.5 = 277.959... ; A1 for 278 cm^3" });
+  assert.match(cone.a, /277 cm\^3/);
+});
+
+test("the copy-a-prompt text asks for the full 25 maths questions", () => {
+  assert.match(L.buildAiPrompt({ topic: "Maths", subject: "Maths", mode: "exam", count: 25, mathsPaper: "2" }), /Write 25 exam-style questions/);
+  assert.match(L.buildAiPrompt({ topic: "Biology", subject: "Biology", mode: "exam", count: 25 }), /Write 20 exam-style questions/);
+});
