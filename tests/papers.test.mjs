@@ -40,3 +40,10 @@ test("maths text: powers, roots and fractions are found", () => {
   assert.equal(L.mathParts("12/05/2024", true), null);
   assert.equal(L.mathParts("plain words"), null);
 });
+
+test("checkMaths flags wrong sums in the working and leaves right ones", () => {
+  const bad = L.checkMaths({ how: "1. Calculate 248000 × 1.046^7 = 340773.8 ; 2. Round to the nearest pound", a: "M1 for x" });
+  assert.equal(bad.length, 1); assert.equal(bad[0].got, 339760.958);
+  assert.equal(L.checkMaths({ how: "Calculate 237 ÷ 2.75 = 86.1818... ; then 8.6 × π = 27.017... ; 21.5 × cos(37) = 17.171 ; 1/3 × π × 4.8^2 × 11.5 = 277.465", a: "2 + 45/60 = 2.75 ; £9 331.20" }).length, 0);
+  assert.equal(L.checkMaths({ a: "M1 for 210/1260 = 1/6 = 0.167" }).length, 0);
+});

@@ -1901,3 +1901,62 @@ export function mathParts(text, fractions = false) {
   if (last < src.length) out.push({ t: "text", v: src.slice(last) });
   return out;
 }
+
+// ---------- checking an AI's sums: finds "calculation = number" in the working and re-does it ----------
+const FN = { "\uE001": (x) => Math.sin((x * Math.PI) / 180), "\uE002": (x) => Math.cos((x * Math.PI) / 180), "\uE003": (x) => Math.tan((x * Math.PI) / 180), "\uE004": Math.sqrt };
+function evalSum(src) {
+  const t = src.replace(/\s+/g, "").replace(/×|\*|x(?=\d|\()/g, "*").replace(/÷/g, "/").replace(/−|–/g, "-").replace(/(\d|\))(?=π|\(|[\uE001-\uE004])/g, "$1*").replace(/π(?=\d|\()/g, "π*").replace(/%/g, "/100");
+  let i = 0;
+  const peek = () => t[i];
+  const num = () => {
+    const m = /^\d+(?:\.\d+)?/.exec(t.slice(i));
+    if (!m) throw 0;
+    i += m[0].length; return Number(m[0]);
+  };
+  function atom() {
+    const c = peek();
+    if (c === "(") { i++; const v = add(); if (peek() !== ")") throw 0; i++; return v; }
+    if (c === "π") { i++; return Math.PI; }
+    if (c && FN[c]) { i++; const arg = peek() === "(" ? atom() : num(); return FN[c](arg); }
+    if (c === "-") { i++; return -pow(); }
+    return num();
+  }
+  function pow() { const b = atom(); if (peek() === "^") { i++; const e = peek() === "-" ? (i++, -pow()) : pow(); return Math.pow(b, e); } return b; }
+  function mul() { let v = pow(); while (peek() === "*" || peek() === "/") { const o = t[i++]; const r = pow(); v = o === "*" ? v * r : v / r; } return v; }
+  function add() { let v = mul(); while (peek() === "+" || peek() === "-") { const o = t[i++]; const r = mul(); v = o === "+" ? v + r : v - r; } return v; }
+  const v = add();
+  if (i !== t.length || !Number.isFinite(v)) throw 0;
+  return v;
+}
+const SUM_CH = "0-9.,+\\-−–×÷*/^()π%\\s\uE001-\uE004";
+/** Looks through a question's working and mark scheme for "sum = answer" and re-does each sum. Returns a list of warnings (empty if all fine). */
+export function checkMaths(item) {
+  const out = [];
+  const text = [item && item.how, item && item.a].filter(Boolean).join(" ; ")
+    .replace(/(\d) (?=\d{3}\b)/g, "$1").replace(/(\d),(?=\d{3}\b)/g, "$1").replace(/[£€$]/g, "")
+    .replace(/\bsin\b/gi, "\uE001").replace(/\bcos\b/gi, "\uE002").replace(/\btan\b/gi, "\uE003").replace(/\bsqrt\b|√/gi, "\uE004");
+  for (const seg of text.split(/\s*;\s*|\n+/)) {
+    const parts = seg.split("=");
+    for (let k = 0; k + 1 < parts.length; k++) {
+      const left = new RegExp("[" + SUM_CH + "]+$").exec(parts[k]);
+      const right = new RegExp("^[" + SUM_CH + "]+").exec(parts[k + 1].replace(/^\s+/, ""));
+      if (!left || !right) continue;
+      const lt = left[0].replace(/^[\s.,]+/, "").replace(/[\s.,]+$/, "");
+      const rt = right[0].replace(/[\s.,]+$/, "");
+      if (!/\d/.test(lt) || !/\d/.test(rt) || !/[-+*×÷/^π\uE001-\uE004]/.test(lt.replace(/^-/, ""))) continue;
+      let a, b;
+      try { a = evalSum(lt); b = evalSum(rt); } catch { continue; }
+      const plain = /^-?\d+(?:\.\d+)?$/.test(rt.replace(/\s/g, ""));
+      const dp = plain ? (rt.split(".")[1] || "").length : null;
+      const dots = /(\.\.\.|…)\s*$/.test(right[0]) || /^\s*(\.\.\.|…)/.test(parts[k + 1].slice(right[0].length));
+      let ok;
+      if (plain) {
+        const f = 10 ** dp, near = (x) => Math.abs(x - b) < 0.5 / f * 1.0001;
+        ok = near(a) || (dots && Math.abs(Math.trunc(a * f) / f - b) < 1e-9) || Math.abs(a - b) < 1e-9 * Math.max(1, Math.abs(b));
+        if (!ok && dp === 0) ok = false;
+      } else ok = Math.abs(a - b) <= 1e-9 * Math.max(1, Math.abs(a), Math.abs(b));
+      if (!ok) out.push({ sum: lt.replace(/\uE001/g, "sin").replace(/\uE002/g, "cos").replace(/\uE003/g, "tan").replace(/\uE004/g, "√"), said: rt, got: Math.round(a * 1e4) / 1e4 });
+    }
+  }
+  return out;
+}
